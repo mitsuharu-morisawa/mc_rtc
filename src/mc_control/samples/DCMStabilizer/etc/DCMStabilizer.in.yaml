@@ -1,0 +1,210 @@
+###
+# This FSM is meant to test and tune the DCMStabilizer
+#
+# See the transition map description for details
+###
+---
+## If true, the FSM transitions are managed by an external tool
+Managed: false
+# If true and the FSM is self-managed, transitions should be triggered
+StepByStep: false
+# Change idle behaviour, if true the state is kept until transition,
+# otherwise the FSM holds the last state until transition
+IdleKeepState: true
+# Where to look for state libraries
+StatesLibraries:
+- "@DCMStabilizer_STATES_INSTALL_PREFIX@"
+# Where to look for state files
+StatesFiles:
+- "@DCMStabilizer_STATES_DATA_INSTALL_PREFIX@"
+# If true, state factory will be more verbose
+VerboseStateFactory: false
+
+# Additional robots to load
+robots:
+  ground:
+    module: env/ground
+# General constraints, always on
+constraints:
+- type: contact
+- type: kinematics
+  damper: [0.1, 0.01, 0.5]
+- type: compoundJoint
+# Collision constraint
+collisions:
+- type: collision
+  useMinimal: true
+# Initial set of contacts
+contacts: []
+hrp2_drc:
+  posture:
+    stiffness: 1.0
+    weight: 10.0
+hrp5_p:
+  posture:
+    stiffness: 1.0
+    weight: 10.0
+jvrc1:
+  posture:
+    stiffness: 1.0
+    weight: 10.0
+
+# Implement some additional text states
+states:
+  DCMStabilizer::Pause_2s:
+    base: Pause
+    duration: 2
+  DCMStabilizer::CustomConfiguration:
+    base: DCMStabilizer::Standing
+
+    # Add contacts to the solver.
+    # Note that in order for the stabilizer to work, roll and pitch DoF need to be free to allow for admittance
+    # control of the feet, and vertical DoF to allow for foot force-difference control.
+    AddContacts:
+    - r1: hrp2_drc
+      r2: ground
+      r1Surface: LeftFoot
+      r2Surface: AllGround
+      dof: [0, 0, 1, 1, 1, 0]
+    - r1: hrp2_drc
+      r2: ground
+      r1Surface: RightFoot
+      r2Surface: AllGround
+      dof: [0, 0, 1, 1, 1, 0]
+
+    DCMStabilizerConfig:
+      enabled: true
+
+      ###########################
+      ## Stabilizer configuration
+      ###########################
+      # Default values for these robot-specific parameters are set in the corresponding robot module.
+      # You may choose to override any of them here, with due caution.
+      default:
+        tasks:
+          com:
+            stiffness: [1000, 1000, 100]
+            weight: 1000
+            
+      hrp5_p:
+        leftFootSurface: LeftFoot
+        rightFootSurface: RightFoot
+        torsoBodyName: CHEST_LINK1
+        # Configuration  of the QP tasks used by the stabilizer
+        tasks:
+          com:
+            active_joints: [Root, RLEG_JOINT0, RLEG_JOINT1, RLEG_JOINT2, RLEG_JOINT3, RLEG_JOINT4, RLEG_JOINT5, LLEG_JOINT0, LLEG_JOINT1, LLEG_JOINT2, LLEG_JOINT3, LLEG_JOINT4, LLEG_JOINT5]
+            height: 0.87
+            
+          # Impedance coefficients (force-control)
+          foot:
+            stand:
+              mass:
+                angular: [1,  1,  1]
+                linear: [50, 50, 50]
+              damper:
+                angular: [100, 100, 100]
+                linear: [400, 400, 100]
+              spring:
+                angular: [0,  0,  0]
+                linear: [0,  0,  0]
+              wrench:
+                angular: [1,  1,  0]
+                linear: [0.1, 0.1, 0.1]
+            double-support:
+              mass:
+                angular: [1,  1,  1]
+                linear: [50, 50, 50]
+              damper:
+                angular: [100, 100, 100]
+                linear: [400, 400, 30]
+              spring:
+                angular: [0,  0,  0]
+                linear: [0,  0,  0]
+              wrench:
+                angular: [1,  1,  0]
+                linear: [0.1, 0.1, 0.1]
+            single-support:
+              mass:
+                angular: [1,  1,  1]
+                linear: [100, 100, 100]
+              damper:
+                angular: [100, 100, 100]
+                linear: [30, 30, 30]
+              spring:
+                angular: [0,  0,  0]
+                linear: [225, 225, 225]
+              wrench:
+                angular: [1,  1,  0]
+                linear: [0, 0, 0]
+            swing:
+              mass:
+                angular: [1,  1,  1]
+                linear: [10, 10, 10]
+              damper:
+                angular: [40, 40, 40]
+                linear: [30, 30, 30]
+              spring:
+                angular: [400, 400, 400]
+                linear: [225, 225, 225]
+              wrench:
+                angular: [0,  0,  0]
+                linear: [0,  0,  0]
+            air:
+              mass:
+                angular: [1,  1,  1]
+                linear: [10, 10, 10]
+              damper:
+                angular: [30, 30, 30]
+                linear: [30, 30, 30]
+              spring:
+                angular: [100, 100, 100]
+                linear: [100, 100, 100]
+              wrench:
+                angular: [0,  0,  0]
+                linear: [0,  0,  0]
+            weight: 10000
+            
+        ########################
+        # Gains for DCM tracking
+        ########################
+        # These are the main gains of the stabilizer.
+        dcm_tracking:
+          gains:
+            prop: 3
+            integral: 20
+            deriv: 0.5
+          derivator_time_constant: 5
+
+      # Change some parameters for another robot
+      jvrc1:
+        dcm_tracking:
+          gains:
+            prop: 4
+            integral: 10
+            deriv: 0.5
+
+  ###
+  # Simple state to switch between LIPMStabilizer and DCMStabilizer
+  ###
+  #DCMStabilizer::SwitchToLIPMStabilizer:
+  #  base: Meta:
+  #  transitions:
+  #    - [DCMStabilizer::Stabilized::LiftRightFoot, OK, DCMStabilizer::Stabilized::PutRightFoot]
+
+# Initial state
+init: @DCMStabilizer_INIT_STATE@
+
+ObserverPipelines:
+- name: "MainPipeline"
+  observers:
+    - type: Encoder
+      # Floating base kinematic-inertial state observation
+    - type: KinematicInertial
+      config:
+        anchorFrame:
+          maxAnchorFrameDiscontinuity: 0.02
+    - type: BodySensor
+      update: false
+      config:
+        bodySensor: FloatingBase

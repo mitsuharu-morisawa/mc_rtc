@@ -197,6 +197,7 @@ set(mc_rbdyn_HDR
 ../include/mc_rbdyn/BodySensor.h
 ../include/mc_rbdyn/configuration_io.h
 ../include/mc_rbdyn/lipm_stabilizer/StabilizerConfiguration.h
+../include/mc_rbdyn/lipm_stabilizer/DCMStabilizerConfiguration.h
 ../include/mc_rbdyn/lipm_stabilizer/ZMPCCConfiguration.h
 ../include/mc_rbdyn/ZMP.h
 ../include/mc_control/generic_gripper.h
@@ -364,6 +365,8 @@ mc_tasks/lipm_stabilizer/StabilizerTask.cpp
 mc_tasks/lipm_stabilizer/StabilizerTask_log_gui.cpp
 mc_tasks/lipm_stabilizer/ZMPCC.cpp
 mc_tasks/lipm_stabilizer/Contact.cpp
+mc_tasks/lipm_stabilizer/DCMStabilizerTask.cpp
+mc_tasks/lipm_stabilizer/DCMStabilizerTask_log_gui.cpp
 )
 
 set(mc_tasks_HDR
@@ -397,8 +400,11 @@ set(mc_tasks_HDR
 ../include/mc_tasks/LookAtTask.h
 ../include/mc_tasks/ExactCubicTrajectoryTask.h
 ../include/mc_tasks/lipm_stabilizer/StabilizerTask.h
+../include/mc_tasks/lipm_stabilizer/DCMStabilizerTask.h
 ../include/mc_tasks/lipm_stabilizer/Contact.h
 ../include/mc_tasks/lipm_stabilizer/ZMPCC.h
+../include/mc_tasks/lipm_stabilizer/VerticesInfo.h
+../include/mc_tasks/lipm_stabilizer/SupportPolygonManager.h
 )
 
 add_library(mc_tasks SHARED ${mc_tasks_SRC} ${mc_tasks_HDR})

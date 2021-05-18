@@ -48,10 +48,10 @@ struct LowPass
    */
   void cutoffPeriod(double period)
   {
-    if(period < 2 * dt_)
+    if(period < dt_)
     {
       mc_rtc::log::warning("Time constant must be at least twice the timestep (Nyquist–Shannon sampling theorem)");
-      period = 2 * dt_;
+      period = dt_;
     }
     cutoffPeriod_ = period;
   }

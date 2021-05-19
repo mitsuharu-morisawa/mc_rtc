@@ -555,8 +555,8 @@ bool DCMStabilizerTask::calcForceDistributionRatio(Eigen::Matrix3d& Rfoot)
   bool limit_over = false;
   
   // Project desired ZMP in-between foot-sole ankle frames and compute ratio along the line in-beween the two surfaces
-  const Eigen::Vector3d & rfoot_pos = contacts_.at(ContactState::Right).anklePose().translation();
-  const Eigen::Vector3d & lfoot_pos = contacts_.at(ContactState::Left).anklePose().translation();
+  const Eigen::Vector3d & rfoot_pos = footTasks_.at(ContactState::Right)->targetPose().translation();
+  const Eigen::Vector3d & lfoot_pos = footTasks_.at(ContactState::Left)->targetPose().translation();
   const Eigen::Vector3d p0(lfoot_pos - rfoot_pos);
   const double length = sqrt(p0.x()*p0.x() + p0.y()*p0.y());
   const double cth = p0.y() / length;
@@ -797,7 +797,8 @@ void DCMStabilizerTask::run()
 
   // Update orientation tasks according to feet orientation
   sva::PTransformd X_0_a = anchorFrame(robot());
-  Eigen::Matrix3d pelvisOrientation = X_0_a.rotation();
+  //Eigen::Matrix3d pelvisOrientation = X_0_a.rotation();
+  Eigen::Matrix3d pelvisOrientation = sva::RotZ(mc_rbdyn::rpyFromMat(X_0_a.rotation())[2]);
   pelvisTask_->orientation(pelvisOrientation);
   torsoTask_->orientation(mc_rbdyn::rpyToMat({0, c_.torsoPitch, 0}) * pelvisOrientation);
   
@@ -833,7 +834,6 @@ void DCMStabilizerTask::computeDesiredWrench()
   {
     dcmDerivator_.reset(Eigen::Vector3d::Zero());
     dcmErrorSum_ = Eigen::Vector3d::Zero();
-    dcmError_pre_ = Eigen::Vector3d::Zero();
   }
   else
   {
@@ -883,10 +883,9 @@ void DCMStabilizerTask::computeDesiredWrench()
       dcmEstimatorNeedsReset_ = true;
     }
     
-    dcmDerivator_.update(dcmError_ - dcmError_pre_);
+    dcmDerivator_.update(dcmError_);
     dcmErrorSum_ += dcmError_ * dt_;
     dcmErrorSum_ = clamp(dcmErrorSum_, -c_.safetyThresholds.MAX_AVERAGE_DCM_ERROR, c_.safetyThresholds.MAX_AVERAGE_DCM_ERROR);
-    dcmError_pre_ = dcmError_;
   }
   dcmVelError_ = dcmDerivator_.eval();
   
@@ -965,13 +964,8 @@ void DCMStabilizerTask::computeDesiredWrench()
 
 void DCMStabilizerTask::distributeWrench()
 {
-  //const auto & rightContact = contacts_.at(ContactState::Right);
-  //const auto & leftContact = contacts_.at(ContactState::Left);
-  //const sva::PTransformd & X_0_rankle = rightContact.anklePose();
-  //const sva::PTransformd & X_0_lankle = leftContact.anklePose();
-  
-  const sva::PTransformd & X_0_rankle = footTasks_.at(ContactState::Right)->targetPose();
-  const sva::PTransformd & X_0_lankle = footTasks_.at(ContactState::Left)->targetPose();
+  const sva::PTransformd & X_0_rc = footTasks_.at(ContactState::Right)->targetPose();
+  const sva::PTransformd & X_0_lc = footTasks_.at(ContactState::Left)->targetPose();
   
   Eigen::Matrix3d Rfoot;
   bool zmp_limit_over_prev = zmp_limit_over_;
@@ -1002,8 +996,8 @@ void DCMStabilizerTask::distributeWrench()
     uncompTorque_.setZero();
   }
   
-  const Eigen::Vector3d & rfoot_pos = X_0_rankle.translation();
-  const Eigen::Vector3d & lfoot_pos = X_0_lankle.translation();
+  const Eigen::Vector3d & rfoot_pos = X_0_rc.translation();
+  const Eigen::Vector3d & lfoot_pos = X_0_lc.translation();
   const Eigen::Vector3d rfoot_force = distribWrench_.force() * leftFootRatio_;
   const Eigen::Vector3d lfoot_force = distribWrench_.force() * (1.0 - leftFootRatio_);
   Eigen::Vector3d tau(Rfoot *
@@ -1065,34 +1059,20 @@ void DCMStabilizerTask::distributeWrench()
   const sva::ForceVecd w_r_0(rfoot_torque, rfoot_force);
   const sva::ForceVecd w_l_0(lfoot_torque, lfoot_force);
   
-  //const sva::PTransformd & X_0_rc = rightContact.surfacePose();
-  //const sva::PTransformd & X_0_lc = leftContact.surfacePose();
+  footTasks_.at(ContactState::Right)->targetWrenchW(w_r_0);
+  footTasks_.at(ContactState::Left)->targetWrenchW(w_l_0);
   
-  //const sva::ForceVecd w_r_rc = X_0_rc.dualMul(w_r_0);
-  //const sva::ForceVecd w_l_lc = X_0_lc.dualMul(w_l_0);
-  
-  const sva::ForceVecd w_r_rc = X_0_rankle.dualMul(w_r_0);
-  const sva::ForceVecd w_l_lc = X_0_lankle.dualMul(w_l_0);
-  
-  footTasks_.at(ContactState::Right)->targetWrench(w_r_rc);
-  footTasks_.at(ContactState::Left)->targetWrench(w_l_lc);
-  
+#if 0
   std::cout << "w_r_rc.force = " << w_r_rc.force().transpose() << std::endl;
   std::cout << "w_l_lc.force = " << w_l_lc.force().transpose() << std::endl;
   std::cout << "w_r_rc.moment = " << w_r_rc.moment().transpose() << std::endl;
   std::cout << "w_l_lc.moment = " << w_l_lc.moment().transpose() << std::endl;
-  
-#if 0
-  std::cout << "X_0_rc trs = " << X_0_rankle.translation().transpose() << std::endl;
-  std::cout << "X_0_rc rot = " << X_0_rankle.rotation() << std::endl;
-  std::cout << "X_0_lc trs = " << X_0_lankle.translation().transpose() << std::endl;
-  std::cout << "X_0_lc rot = " << X_0_lankle.rotation() << std::endl;
 #endif
 #if 0
-  std::cout << "X_0_lankle trs = " << leftContact.anklePose().translation().transpose() << std::endl;
-  std::cout << "X_0_lankle rot = " << leftContact.anklePose().rotation() << std::endl;
-  std::cout << "X_0_rankle trs = " << rightContact.anklePose().translation().transpose() << std::endl;
-  std::cout << "X_0_rankle rot = " << rightContact.anklePose().rotation() << std::endl; 
+  std::cout << "X_0_rc trs = " << X_0_rc.translation().transpose() << std::endl;
+  std::cout << "X_0_rc rot = " << X_0_rc.rotation() << std::endl;
+  std::cout << "X_0_lc trs = " << X_0_lc.translation().transpose() << std::endl;
+  std::cout << "X_0_lc rot = " << X_0_lc.rotation() << std::endl;
 #endif
 #if 0
   std::cout << "rfoot_force = " << rfoot_force.transpose() << std::endl;

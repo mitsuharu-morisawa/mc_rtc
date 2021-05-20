@@ -42,7 +42,8 @@ void ImpedanceTask::update(mc_solver::QPSolver & solver)
   filteredMeasuredWrench_ = lowPass_.eval();
 
   // 2. Compute the compliance acceleration
-  sva::PTransformd T_0_s(surfacePose().rotation());
+  //sva::PTransformd T_0_s(surfacePose().rotation());
+  sva::PTransformd T_0_s(targetPoseW_.rotation());
   // deltaCompAccelW_ is represented in the world frame
   //   \Delta \ddot{p}_{cd} = - \frac{D}{M} \Delta \dot{p}_{cd} - \frac{K}{M} \Delta p_{cd})
   //   + \frac{K_f}{M} (f_m - f_d) where \Delta p_{cd} = p_c - p_d
@@ -90,6 +91,7 @@ void ImpedanceTask::update(mc_solver::QPSolver & solver)
       aaDeltaCompVelIntegralC.toRotationMatrix().transpose(), mvDeltaCompVelIntegralC.linear());
   // Since deltaCompVelIntegral is multiplied by deltaCompPoseW_, it must be represented in the deltaCompliance frame
   deltaCompPoseW_ = deltaCompVelIntegral * deltaCompPoseW_;
+  //deltaCompPoseW_ = deltaCompPoseW_ * deltaCompVelIntegral;
   // 3.2 Integrate acceleration to velocity
   deltaCompVelW_ += dt * deltaCompAccelW_;
 
@@ -129,7 +131,8 @@ void ImpedanceTask::update(mc_solver::QPSolver & solver)
     // Transform to target pose frame (see compliancePose implementation)
     sva::PTransformd T_0_d(targetPoseW_.rotation());
     // The previous compliancePose() is stored in SurfaceTransformTask::target()
-    deltaCompPoseW_ = T_0_d.inv() * SurfaceTransformTask::target() * targetPoseW_.inv() * T_0_d;
+    //deltaCompPoseW_ = T_0_d.inv() * SurfaceTransformTask::target() * targetPoseW_.inv() * T_0_d;
+    deltaCompPoseW_ = targetPoseW_.inv() * T_0_d;
   }
 
   // 5. Set compliance values to the targets of SurfaceTransformTask

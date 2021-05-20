@@ -162,7 +162,8 @@ public:
    */
   void targetWrenchW(const sva::ForceVecd & wrenchW)
   {
-    const auto & X_0_s = robots.robot(rIndex).surfacePose(surfaceName);
+    //const auto & X_0_s = robots.robot(rIndex).surfacePose(surfaceName);
+    const auto & X_0_s = targetPoseW_;
     targetWrench(X_0_s.dualMul(wrenchW));
   }
 

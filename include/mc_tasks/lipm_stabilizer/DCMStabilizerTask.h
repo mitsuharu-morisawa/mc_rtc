@@ -773,7 +773,6 @@ protected:
   Eigen::Vector3d dcmErrorSum_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d dcmError_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d dcmVelError_ = Eigen::Vector3d::Zero();
-  Eigen::Vector3d dcmError_pre_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d measuredCoM_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d measuredCoMd_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d measuredZMP_ = Eigen::Vector3d::Zero();

@@ -37,9 +37,24 @@ void DCMStabilizerTask::addToGUI(mc_rtc::gui::StateBuilder & gui)
     };
   // clang-format on
 
+  gui.addElement({"Tasks", name_, "Main"}, Button("Disable", [this]() { disable(); }),
+                 Button("Reset DCM integrator", [this]() { dcmIntegrator_.reset(Eigen::Vector3d::Zero()); }));
   addConfigButtons({"Tasks", name_, "Main"});
   gui.addElement(
       {"Tasks", name_, "Main"},
+      ArrayInput("Foot admittance", {"CoPx", "CoPy"},
+                 [this]() -> Eigen::Vector2d {
+                   return {c_.copAdmittance.x(), c_.copAdmittance.y()};
+                 },
+                 [this](const Eigen::Vector2d & a) { copAdmittance(a); }),
+      ArrayInput("Foot force difference", {"Admittance", "Damping"},
+                 [this]() -> Eigen::Vector2d {
+                   return {c_.dfzAdmittance, c_.dfzDamping};
+                 },
+                 [this](const Eigen::Vector2d & a) {
+                   dfzAdmittance(a(0));
+                   dfzDamping(a(1));
+                 }),
       ArrayInput("DCM poles", {"alpha", "beta", "gamma"},
                  [this]() -> Eigen::Vector3d { return c_.dcmPoles; },
                  [this](const Eigen::Vector3d & poles) { c_.dcmPoles = poles; }),
@@ -50,12 +65,46 @@ void DCMStabilizerTask::addToGUI(mc_rtc::gui::StateBuilder & gui)
                    return {c_.dcmPropGain, c_.dcmIntegralGain, c_.dcmDerivGain};
                  },
                  [this](const Eigen::Vector3d & gains) { dcmGains(gains(0), gains(1), gains(2)); }),
-      NumberInput("DCM Derivator T", [this]() { return dcmDerivator_.timeConstant(); } ,
-                  [this](double a) { dcmDerivatorTimeConstant(a); }));
+      NumberInput("CoMd Error gain", [this]() { return c_.comdErrorGain; }, [this](double a) { c_.comdErrorGain = a; }),
+      NumberInput("ZMPd gain", [this]() { return c_.zmpdGain; }, [this](double a) { c_.zmpdGain = a; }),
+      ArrayInput("DCM filters", {"Integrator T [s]", "Derivator T [s]"},
+                 [this]() -> Eigen::Vector2d {
+                   return {dcmIntegrator_.timeConstant(), dcmDerivator_.timeConstant()};
+                 },
+                 [this](const Eigen::Vector2d & T) {
+                   dcmIntegratorTimeConstant(T(0));
+                   dcmDerivatorTimeConstant(T(1));
+                 }));
   gui.addElement({"Tasks", name_, "Advanced"}, Button("Disable", [this]() { disable(); }));
   addConfigButtons({"Tasks", name_, "Advanced"});
+  gui.addElement({"Tasks", name_, "Advanced"},
+                 Checkbox("Apply CoM admittance only in double support?", [this]() { return zmpccOnlyDS_; },
+                          [this]() { zmpccOnlyDS_ = !zmpccOnlyDS_; }));
+  zmpcc_.addToGUI(gui, {"Tasks", name_, "Advanced"});
   gui.addElement(
       {"Tasks", name_, "Advanced"},
+      NumberInput("Admittance Velocity Filter [0-1]", [this]() { return c_.copVelFilterGain; },
+                  [this](double gain) { copVelFilterGain(gain); }),
+      ArrayInput("Max cop angular velocity [rad/s]",
+                 [this]() -> const Eigen::Vector3d & { return footTasks.at(ContactState::Left)->maxAngularVel(); },
+                 [this](const Eigen::Vector3d & v) {
+                   footTasks.at(ContactState::Left)->maxAngularVel(v);
+                   footTasks.at(ContactState::Right)->maxAngularVel(v);
+                 }),
+      ArrayInput("Max cop linear velocity [m/s]",
+                 [this]() -> const Eigen::Vector3d & { return footTasks.at(ContactState::Left)->maxLinearVel(); },
+                 [this](const Eigen::Vector3d & v) {
+                   footTasks.at(ContactState::Left)->maxLinearVel(v);
+                   footTasks.at(ContactState::Right)->maxLinearVel(v);
+                 }),
+      ArrayInput("Vertical drift compensation", {"frequency", "stiffness"},
+                 [this]() -> Eigen::Vector2d {
+                   return {c_.vdcFrequency, c_.vdcStiffness};
+                 },
+                 [this](const Eigen::Vector2d & v) {
+                   vdcFrequency(v(0));
+                   vdcStiffness(v(1));
+                 }),
       NumberInput("Torso pitch [rad]", [this]() { return c_.torsoPitch; },
                   [this](double pitch) { torsoPitch(pitch); }));
   gui.addElement({"Tasks", name_, "Advanced", "DCM Bias"}, mc_rtc::gui::ElementsStacking::Horizontal,
@@ -166,7 +215,16 @@ void DCMStabilizerTask::addToGUI(mc_rtc::gui::StateBuilder & gui)
                                       plot::Y("com_mes", [this]() { return measuredCoM_.y(); }, Color::Magenta));
                         }),
                  Button("Stop CoM (y)", [&gui]() { gui.removePlot("CoM Tracking (y)"); }));
-  
+
+  gui.addElement({"Tasks", name_, "Debug"}, ElementsStacking::Horizontal,
+                 Button("Plot DCM Integrator",
+                        [this, &gui]() {
+                          gui.addPlot("DCM Integrator", plot::X("t", [this]() { return t_; }),
+                                      plot::Y("x", [this]() { return dcmIntegrator_.eval().x(); }, Color::Red),
+                                      plot::Y("y", [this]() { return dcmIntegrator_.eval().y(); }, Color::Green),
+                                      plot::Y("z", [this]() { return dcmIntegrator_.eval().z(); }, Color::Blue));
+                        }),
+                 Button("Stop DCM Integrator", [&gui]() { gui.removePlot("DCM Integrator"); }));
   gui.addElement({"Tasks", name_, "Debug"}, ElementsStacking::Horizontal,
                  Button("Plot DCM Derivator",
                         [this, &gui]() {
@@ -176,11 +234,15 @@ void DCMStabilizerTask::addToGUI(mc_rtc::gui::StateBuilder & gui)
                                       plot::Y("z", [this]() { return dcmDerivator_.eval().z(); }, Color::Blue));
                         }),
                  Button("Stop DCM Derivator", [&gui]() { gui.removePlot("DCM Derivator"); }));
-  
+
   gui.addElement({"Tasks", name_, "Debug"},
-                 ArrayLabel("DCM error sum[mm s]", {"x", "y"}, [this]() { return vecFromError(dcmErrorSum_); }),
-                 ArrayLabel("DCM error [mm]", {"x", "y"}, [this]() { return vecFromError(dcmError_); }));
-  
+                 ArrayLabel("DCM error sum [mm]", {"x", "y"}, [this]() { return vecFromError(dcmErrorSum_); }),
+                 ArrayLabel("DCM error [mm]", {"x", "y"}, [this]() { return vecFromError(dcmError_); }),
+                 ArrayLabel("Foot force difference error [mm]", {"force", "height"}, [this]() {
+                   Eigen::Vector3d dfzError = {dfzForceError_, dfzHeightError_, 0.};
+                   return vecFromError(dfzError);
+                 }));
+
   ///// GUI MARKERS
   constexpr double ARROW_HEAD_DIAM = 0.015;
   constexpr double ARROW_HEAD_LEN = 0.05;
@@ -232,8 +294,8 @@ void DCMStabilizerTask::addToGUI(mc_rtc::gui::StateBuilder & gui)
             [this, FORCE_SCALE]() -> Eigen::Vector3d {
               return measuredZMP_ + FORCE_SCALE * measuredNetWrench_.force();
             }));
-#if 0
-  for(const auto footTask : footTasks_)
+
+  for(const auto footTask : footTasks)
   {
     auto footT = footTask.second;
     gui.addElement(
@@ -246,7 +308,7 @@ void DCMStabilizerTask::addToGUI(mc_rtc::gui::StateBuilder & gui)
               },
               [footT]() { return sva::PTransformd(footT->measuredCoPW()); }));
   }
-#endif
+
   gui.addElement({"Tasks", name_, "Markers", "Contacts"},
                  Polygon("SupportContacts", Color::Green, [this]() { return supportPolygons_; }));
 }
@@ -257,6 +319,7 @@ void DCMStabilizerTask::removeFromGUI(mc_rtc::gui::StateBuilder & gui)
   gui.removePlot("DCM-ZMP Tracking (x)");
   gui.removePlot("DCM-ZMP Tracking (y)");
   gui.removePlot("CoM Tracking (x)");
+  gui.removePlot("DCM Integrator");
 }
 
 void DCMStabilizerTask::addToLogger(mc_rtc::Logger & logger)
@@ -264,16 +327,21 @@ void DCMStabilizerTask::addToLogger(mc_rtc::Logger & logger)
   // Globbal log entries added to other categories
   MC_RTC_LOG_HELPER("perf_" + name_, runTime_);
 
-  MC_RTC_LOG_HELPER(name_ + "_error_dcm_error_sum", dcmErrorSum_);
   MC_RTC_LOG_HELPER(name_ + "_error_dcm_pos", dcmError_);
   MC_RTC_LOG_HELPER(name_ + "_error_dcm_vel", dcmVelError_);
+  MC_RTC_LOG_HELPER(name_ + "_error_dfz_force", dfzForceError_);
+  MC_RTC_LOG_HELPER(name_ + "_error_dfz_height", dfzHeightError_);
+  MC_RTC_LOG_HELPER(name_ + "_error_vdc", vdcHeightError_);
+  logger.addLogEntry(name_ + "_admittance_cop", this, [this]() -> const Eigen::Vector2d & { return c_.copAdmittance; });
+  logger.addLogEntry(name_ + "_admittance_dfz", this, [this]() { return c_.dfzAdmittance; });
   logger.addLogEntry(name_ + "_dcmDerivator_filtered", this, [this]() { return dcmDerivator_.eval(); });
   logger.addLogEntry(name_ + "_dcmDerivator_timeConstant", this, [this]() { return dcmDerivator_.timeConstant(); });
-  logger.addLogEntry(name_ + "_dcmTracking_poles", this, [this]() { return c_.dcmPoles; });
-  logger.addLogEntry(name_ + "_dcmTracking_flexibility", this, [this]() { return c_.dcmFlexibility; });
+  logger.addLogEntry(name_ + "_dcmIntegrator_timeConstant", this, [this]() { return dcmIntegrator_.timeConstant(); });
   logger.addLogEntry(name_ + "_dcmTracking_derivGain", this, [this]() { return c_.dcmDerivGain; });
   logger.addLogEntry(name_ + "_dcmTracking_integralGain", this, [this]() { return c_.dcmIntegralGain; });
   logger.addLogEntry(name_ + "_dcmTracking_propGain", this, [this]() { return c_.dcmPropGain; });
+  logger.addLogEntry(name_ + "_dcmTracking_comdErrorGain", this, [this]() { return c_.comdErrorGain; });
+  logger.addLogEntry(name_ + "_dcmTracking_zmpdGain", this, [this]() { return c_.zmpdGain; });
   logger.addLogEntry(name_ + "_dcmBias_dcmMeasureErrorStd", this, [this]() { return c_.dcmBias.dcmMeasureErrorStd; });
   logger.addLogEntry(name_ + "_dcmBias_zmpMeasureErrorStd", this, [this]() { return c_.dcmBias.zmpMeasureErrorStd; });
   logger.addLogEntry(name_ + "_dcmBias_driftPerSecondStd", this, [this]() { return c_.dcmBias.biasDriftPerSecondStd; });
@@ -291,6 +359,10 @@ void DCMStabilizerTask::addToLogger(mc_rtc::Logger & logger)
   logger.addLogEntry(name_ + "_extWrench_comOffsetErr_ZMPLimit", this,
                      [this]() { return c_.extWrench.comOffsetErrZMPLimit; });
   logger.addLogEntry(name_ + "_extWrench_comOffsetDerivator", this, [this]() { return comOffsetDerivator_.eval(); });
+  logger.addLogEntry(name_ + "_dfz_damping", this, [this]() { return c_.dfzDamping; });
+  logger.addLogEntry(name_ + "_vdc_frequency", this, [this]() { return c_.vdcFrequency; });
+  logger.addLogEntry(name_ + "_vdc_stiffness", this, [this]() { return c_.vdcStiffness; });
+  MC_RTC_LOG_HELPER(name_ + "_desired_wrench", desiredWrench_);
   MC_RTC_LOG_HELPER(name_ + "_wrench", distribWrench_);
   MC_RTC_LOG_HELPER(name_ + "_support_min", supportMin_);
   MC_RTC_LOG_HELPER(name_ + "_support_max", supportMax_);
@@ -340,21 +412,24 @@ void DCMStabilizerTask::addToLogger(mc_rtc::Logger & logger)
   logger.addLogEntry(name_ + "_realRobot_wrench", this,
                      [this]() -> const sva::ForceVecd & { return measuredNetWrench_; });
   logger.addLogEntry(name_ + "_realRobot_zmp", this, [this]() -> const Eigen::Vector3d & { return measuredZMP_; });
-  
-  MetaTask::addToLogger(*comTask_, logger);
-  MetaTask::addToLogger(*pelvisTask_, logger);
-  MetaTask::addToLogger(*torsoTask_, logger);
+
+  zmpcc_.addToLogger(logger, name_);
+
+  MetaTask::addToLogger(*comTask, logger);
+  MetaTask::addToLogger(*pelvisTask, logger);
+  MetaTask::addToLogger(*torsoTask, logger);
 }
 
 void DCMStabilizerTask::removeFromLogger(mc_rtc::Logger & logger)
 {
   MetaTask::removeFromLogger(logger);
-  MetaTask::removeFromLogger(*comTask_, logger);
-  MetaTask::removeFromLogger(*pelvisTask_, logger);
-  MetaTask::removeFromLogger(*torsoTask_, logger);
-  for(auto footT : footTasks_)
+  zmpcc_.removeFromLogger(logger, name_);
+  MetaTask::removeFromLogger(*comTask, logger);
+  MetaTask::removeFromLogger(*pelvisTask, logger);
+  MetaTask::removeFromLogger(*torsoTask, logger);
+  for(const auto & footT : contactTasks)
   {
-    MetaTask::removeFromLogger(*(footT.second), logger);
+    MetaTask::removeFromLogger(*footT, logger);
   }
 }
 

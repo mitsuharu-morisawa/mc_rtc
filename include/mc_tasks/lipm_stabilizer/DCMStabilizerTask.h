@@ -1,8 +1,8 @@
 /*
- * Copyright 2015-2021 CNRS-UM LIRMM, CNRS-AIST JRL
+ * Copyright 2015-2019 CNRS-UM LIRMM, CNRS-AIST JRL
  *
- * This file is extracted hmc2's stabilizer as part of
- * hmc2 <https://github.com/isri-aist/hmc2>
+ * This file is inspired by Stephane's Caron original implementation as part of
+ * lipm_walking_controller <https://github.com/stephane-caron/lipm_walking_controller>
  */
 
 #pragma once
@@ -12,15 +12,14 @@
 #include <mc_filter/LowPass.h>
 #include <mc_filter/StationaryOffset.h>
 #include <mc_tasks/CoMTask.h>
-#include <mc_tasks/SurfaceTransformTask.h>
-#include <mc_tasks/ImpedanceTask.h>
+#include <mc_tasks/CoPTask.h>
 #include <mc_tasks/MetaTask.h>
 #include <mc_tasks/OrientationTask.h>
 
 #include <mc_rbdyn/lipm_stabilizer/DCMStabilizerConfiguration.h>
 #include <mc_tasks/lipm_stabilizer/SupportPolygonManager.h>
 #include <mc_tasks/lipm_stabilizer/Contact.h>
-#include <mc_tasks/lipm_stabilizer/ImpedanceType.h>
+#include <mc_tasks/lipm_stabilizer/ZMPCC.h>
 
 #include <state-observation/dynamics-estimators/lipm-dcm-estimator.hpp>
 
@@ -34,8 +33,9 @@ namespace lipm_stabilizer
 {
 
 using ::mc_filter::utils::clamp;
+using ZMPCCConfiguration = mc_rbdyn::lipm_stabilizer::ZMPCCConfiguration;
 using DCMStabilizerConfiguration = mc_rbdyn::lipm_stabilizer::DCMStabilizerConfiguration;
-using DCMStabilizerSafetyThresholds = mc_rbdyn::lipm_stabilizer::SafetyThresholdsForDCMStabilizer;
+using SafetyThresholdsForDCMStabilizer = mc_rbdyn::lipm_stabilizer::SafetyThresholdsForDCMStabilizer;
 using DCMBiasEstimatorConfiguration = mc_rbdyn::lipm_stabilizer::DCMBiasEstimatorConfiguration;
 using ExternalWrenchConfiguration = mc_rbdyn::lipm_stabilizer::ExternalWrenchConfiguration;
 
@@ -46,7 +46,7 @@ using ExternalWrenchConfiguration = mc_rbdyn::lipm_stabilizer::ExternalWrenchCon
  * state estimation. In our case, feedback is done on the DCM of the LIPM:
  *
  * \f[
- *   \dot{\xi} = \dot{\xi}^{d} + k_p (\xi^d - \xi) + k_d (\dot{\xi}^d - \xi) + k_i \int (\xi^d - \xi)
+ *   \dot{\xi} = \dot{\xi}^{d} + k_p (\xi^d - \xi) + k_i \int (\xi^d - \xi)
  * \f]
  *
  * Which boils down into corresponding formulas for the CoP and CoM
@@ -55,7 +55,7 @@ using ExternalWrenchConfiguration = mc_rbdyn::lipm_stabilizer::ExternalWrenchCon
 struct MC_TASKS_DLLAPI DCMStabilizerTask : public MetaTask
 {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-    
+
   /**
    * @brief Creates a stabilizer meta task
    *
@@ -103,18 +103,18 @@ struct MC_TASKS_DLLAPI DCMStabilizerTask : public MetaTask
    * module.
    *
    * You can configure the stabilizer parameters (DCM tacking gains, task gains, etc) by calling
-   * configure(const DCMStabilizerConfiguration & config)
+   * configure(const StabilizerConfiguration & config)
    *
    * \note If you wish to reset the stabilizer from it's current configuration,
    * you can do so by storing its current configuration as accessed by config()
    * or commitedConfig() and set it explitely after calling reset by calling
-   * configure(const DCMStabilizerConfiguration &);
+   * configure(const StabilizerConfiguration &);
    */
   void reset() override;
 
   /*! \brief Returns the task error
    *
-   * Since the DCMStabilizerTask is a MetaTask, the vector is a concatenation of each
+   * Since the StabilizerTask is a MetaTask, the vector is a concatenation of each
    * sub-tasks. The vector's dimensions depend on the underlying task, and the
    * sub-tasks evaluation depends on their order of insertion.
    */
@@ -122,7 +122,7 @@ struct MC_TASKS_DLLAPI DCMStabilizerTask : public MetaTask
 
   /*! \brief Returns the task velocity
    *
-   * Since the DCMStabilizerTask is a MetaTask, the vector is a concatenation of each
+   * Since the StabilizerTask is a MetaTask, the vector is a concatenation of each
    * sub-tasks. The vector's dimensions depend on the underlying task, and the
    * sub-tasks evaluation depends on their order of insertion.
    */
@@ -231,14 +231,9 @@ struct MC_TASKS_DLLAPI DCMStabilizerTask : public MetaTask
     return contacts_.at(s).anklePose();
   }
 
-  inline std::shared_ptr<mc_tasks::force::ImpedanceTask> footTask(ContactState s)
-  {
-    return footTasks_.at(s);
-  }
-  
   inline const std::string & footSurface(ContactState s) const
   {
-    return footTasks_.at(s)->surface();
+    return footTasks.at(s)->surface();
   }
 
   /**
@@ -289,7 +284,7 @@ struct MC_TASKS_DLLAPI DCMStabilizerTask : public MetaTask
    * @param comd Desired CoM velocity
    * @param comdd Desired CoM acceleration
    * @param zmp Desired ZMP
-   * @param zmpd Desired ZMP velocity (can be omitted when zmpdGain in DCMStabilizerConfiguration is zero)
+   * @param zmpd Desired ZMP velocity (can be omitted when zmpdGain in StabilizerConfiguration is zero)
    *
    * \see staticTarget for a helper to define the stabilizer target when the CoM
    * is static
@@ -333,33 +328,15 @@ struct MC_TASKS_DLLAPI DCMStabilizerTask : public MetaTask
   {
     return measuredCoM_;
   }
-  
-  inline void walkingPhase(ContactState state, ImpedanceType impType, double walkingPhase, double currentTime)
-  {
-    std::cout << "setWalkingPhase:" << (state==ContactState::Right ? "Right" : "Left") << " ";
-    if( impType == mc_tasks::lipm_stabilizer::ImpedanceType::Swing )
-      std::cout << "Swing" << std::endl;
-    else if( impType == mc_tasks::lipm_stabilizer::ImpedanceType::Stand )
-      std::cout << "Stand" << std::endl;
-    else if( impType == mc_tasks::lipm_stabilizer::ImpedanceType::SingleSupport )
-      std::cout << "SingleSupport" << std::endl;
-    else if( impType == mc_tasks::lipm_stabilizer::ImpedanceType::DoubleSupport )
-      std::cout << "DoubleSupport" << std::endl;
-    else if( impType == mc_tasks::lipm_stabilizer::ImpedanceType::Air )
-      std::cout << "Air" << std::endl;
-    
-    walking_phase_[state] = std::make_tuple(impType, walkingPhase, currentTime);
-  }
-  
+
   inline bool inContact(ContactState state) const noexcept
   {
-    return (std::get<0>(walking_phase_.at(state)) != ImpedanceType::Swing) &&
-      (std::get<0>(walking_phase_.at(state)) != ImpedanceType::Air);
+    return contacts_.count(state);
   }
-  
+
   inline bool inDoubleSupport() const noexcept
   {
-    return inContact(ContactState::Right) & inContact(ContactState::Left);
+    return contacts_.size() == 2;
   }
 
   inline const mc_rbdyn::Robot & robot() const noexcept
@@ -379,7 +356,7 @@ struct MC_TASKS_DLLAPI DCMStabilizerTask : public MetaTask
    * For safety purposes, values are clamped against the maximum values defined
    * by the stabilizer configuration.
    *
-   * \see DCMStabilizerConfiguration for details on each
+   * \see StabilizerConfiguration for details on each
    * of these parameters.
    *
    * \see config() Access the current stabilizer configuration values
@@ -394,25 +371,25 @@ struct MC_TASKS_DLLAPI DCMStabilizerTask : public MetaTask
   inline void torsoWeight(double weight) noexcept
   {
     c_.torsoWeight = weight;
-    torsoTask_->weight(c_.torsoWeight);
+    torsoTask->weight(c_.torsoWeight);
   }
 
   inline void torsoStiffness(double stiffness) noexcept
   {
     c_.torsoStiffness = stiffness;
-    torsoTask_->stiffness(stiffness);
+    torsoTask->stiffness(stiffness);
   }
 
   inline void pelvisWeight(double weight) noexcept
   {
     c_.pelvisWeight = weight;
-    pelvisTask_->weight(c_.pelvisWeight);
+    pelvisTask->weight(c_.pelvisWeight);
   }
 
   inline void pelvisStiffness(double stiffness) noexcept
   {
     c_.pelvisStiffness = stiffness;
-    pelvisTask_->stiffness(stiffness);
+    pelvisTask->stiffness(stiffness);
   }
 
   inline void dcmGains(double p, double i, double d) noexcept
@@ -422,18 +399,24 @@ struct MC_TASKS_DLLAPI DCMStabilizerTask : public MetaTask
     c_.dcmDerivGain = clamp(d, 0., c_.safetyThresholds.MAX_DCM_D_GAIN);
   }
 
+  inline void dcmIntegratorTimeConstant(double dcmIntegratorTimeConstant) noexcept
+  {
+    c_.dcmIntegratorTimeConstant = dcmIntegratorTimeConstant;
+    dcmIntegrator_.timeConstant(dcmIntegratorTimeConstant);
+  }
+
   inline void dcmDerivatorTimeConstant(double dcmDerivatorTimeConstant) noexcept
   {
     c_.dcmDerivatorTimeConstant = dcmDerivatorTimeConstant;
     dcmDerivator_.timeConstant(dcmDerivatorTimeConstant);
   }
-  
+
   inline void extWrenchSumLowPassCutoffPeriod(double cutoffPeriod) noexcept
   {
     c_.extWrench.extWrenchSumLowPassCutoffPeriod = cutoffPeriod;
     extWrenchSumLowPass_.cutoffPeriod(cutoffPeriod);
   }
-  
+
   inline void comOffsetLowPassCutoffPeriod(double cutoffPeriod) noexcept
   {
     c_.extWrench.comOffsetLowPassCutoffPeriod = cutoffPeriod;
@@ -455,74 +438,112 @@ struct MC_TASKS_DLLAPI DCMStabilizerTask : public MetaTask
   inline void comWeight(double weight) noexcept
   {
     c_.comWeight = weight;
-    comTask_->weight(weight);
+    comTask->weight(weight);
   }
 
   inline void comStiffness(const Eigen::Vector3d & stiffness) noexcept
   {
     c_.comStiffness = stiffness;
-    comTask_->stiffness(stiffness);
+    comTask->stiffness(stiffness);
   }
 
-  inline void footWeight(double weight) noexcept
+  inline void contactWeight(double weight) noexcept
   {
-    c_.footWeight = weight;
-    for(auto footT : footTasks_)
+    c_.contactWeight = weight;
+    for(auto footT : contactTasks)
     {
-      footT.second->weight(c_.footWeight);
+      footT->weight(c_.contactWeight);
     }
   }
-  
-  inline void footWrench(const ImpedanceType& impType, const sva::ImpedanceVecd & wrench, bool updateToTask = false) noexcept
+
+  inline void contactStiffness(const sva::MotionVecd & stiffness) noexcept
   {
-    c_.footWrench[impType] = wrench;
-    if( updateToTask ){
-      for(auto footT : footTasks_)
-      {
-        footT.second->gains().wrench().vec(wrench);
-      }
+    c_.contactStiffness = stiffness;
+    for(auto contactT : contactTasks)
+    {
+      contactT->stiffness(stiffness);
     }
   }
-  
-  inline void footMass(const ImpedanceType& impType, const sva::ImpedanceVecd & mass, bool updateToTask = false) noexcept
+
+  inline void contactDamping(const sva::MotionVecd & damping) noexcept
   {
-    c_.footMass[impType] = mass;
-    if( updateToTask ){
-      for(auto footT : footTasks_)
-      {
-        footT.second->gains().M().vec(mass);
-      }
+    c_.contactDamping = damping;
+    for(auto contactT : contactTasks)
+    {
+      contactT->damping(damping);
     }
   }
-  
-  inline void footStiffness(const ImpedanceType& impType, const sva::ImpedanceVecd & stiffness, bool updateToTask = false) noexcept
+
+  inline void copAdmittance(const Eigen::Vector2d & copAdmittance) noexcept
   {
-    c_.footStiffness[impType] = stiffness;
-    if( updateToTask ){
-      for(auto footT : footTasks_)
-      {
-        footT.second->gains().K().vec(stiffness);
-      }
+    c_.copAdmittance = clamp(copAdmittance, 0., c_.safetyThresholds.MAX_COP_ADMITTANCE);
+    for(auto contactT : contactTasks)
+    {
+      contactT->admittance(contactAdmittance());
     }
   }
-  
-  inline void footDamping(const ImpedanceType& impType, const sva::ImpedanceVecd & damping, bool updateToTask = false) noexcept
+
+  inline void copMaxVel(const sva::MotionVecd & copMaxVel) noexcept
   {
-    c_.footDamping[impType] = damping;
-    if( updateToTask ){
-      for(auto footT : footTasks_)
-      {
-        footT.second->gains().D().vec(damping);
-      }
+    c_.copMaxVel = copMaxVel;
+    for(const auto & footTask : footTasks)
+    {
+      footTask.second->maxLinearVel(copMaxVel.linear());
+      footTask.second->maxAngularVel(copMaxVel.angular());
     }
   }
-  
-  inline void safetyThresholds(const DCMStabilizerSafetyThresholds & thresholds) noexcept
+
+  /* Set the gain of the low-pass velocity filter of the cop tasks */
+  inline void copVelFilterGain(double gain) noexcept
+  {
+    c_.copVelFilterGain = mc_filter::utils::clamp(gain, 0, 1);
+    for(auto & ft : footTasks)
+    {
+      ft.second->velFilterGain(gain);
+    }
+  }
+
+  /* Get the gain of the low-pass velocity filter of the cop tasks */
+  inline double copVelFilterGain() const noexcept
+  {
+    return c_.copVelFilterGain;
+  }
+
+  inline void vdcFrequency(double freq) noexcept
+  {
+    c_.vdcFrequency = clamp(freq, 0., 10.);
+  }
+
+  inline void vdcStiffness(double stiffness) noexcept
+  {
+    c_.vdcStiffness = clamp(stiffness, 0., 1e4);
+  }
+
+  inline void dfzAdmittance(double dfzAdmittance) noexcept
+  {
+    c_.dfzAdmittance = clamp(dfzAdmittance, 0., c_.safetyThresholds.MAX_DFZ_ADMITTANCE);
+  }
+
+  inline void dfzDamping(double dfzDamping) noexcept
+  {
+    c_.dfzDamping = clamp(dfzDamping, 0., c_.safetyThresholds.MAX_DFZ_DAMPING);
+  }
+
+  /**
+   * @brief Changes the safety thresholds
+   *
+   * This ensures that all the parameters depending on these safety parameters
+   * are within the new thresholds. If they are out of bounds, they will be
+   * clamped back to the new range, and a warning message will be displayed.
+   *
+   * @param thresholds New safety thresholds
+   */
+  inline void safetyThresholds(const SafetyThresholdsForDCMStabilizer & thresholds) noexcept
   {
     c_.safetyThresholds = thresholds;
     c_.clampGains();
     // only requried because we want to apply the new gains immediately
-    //copAdmittance(c_.copAdmittance);
+    copAdmittance(c_.copAdmittance);
   }
 
   /**
@@ -554,6 +575,7 @@ struct MC_TASKS_DLLAPI DCMStabilizerTask : public MetaTask
   inline void externalWrenchConfiguration(const ExternalWrenchConfiguration & extWrenchConfig) noexcept
   {
     c_.extWrench = extWrenchConfig;
+    extWrenchSumLowPass_.cutoffPeriod(c_.extWrench.extWrenchSumLowPassCutoffPeriod);
     comOffsetLowPass_.cutoffPeriod(c_.extWrench.comOffsetLowPassCutoffPeriod);
     comOffsetLowPassCoM_.cutoffPeriod(c_.extWrench.comOffsetLowPassCoMCutoffPeriod);
     comOffsetDerivator_.timeConstant(c_.extWrench.comOffsetDerivatorTimeConstant);
@@ -588,12 +610,17 @@ private:
 
   /** Check whether the robot is in the air. */
   void checkInTheAir();
-  
+
   /** Computes the ratio of force distribution between the feet based on
    * the reference ZMP and contact ankle positions.
    */
   bool calcForceDistributionRatio(Eigen::Matrix3d& Rfoot);
   
+  /** Computes the ratio of force distribution between the feet based on
+   * the reference ZMP and contact ankle positions.
+   */
+  void computeLeftFootRatio();
+
   /** Update real-robot state.
    *
    * \param com Position of the center of mass.
@@ -601,11 +628,24 @@ private:
    * \param comd Velocity of the center of mass.
    */
   void updateState(const Eigen::Vector3d & com, const Eigen::Vector3d & comd);
+
+  /**xo
+   * @brief Update contact tasks in the solver
+   *
+   * @param solver QPSolver holding the tasks
+   */
+  void updateContacts(mc_solver::QPSolver & solver);
   
   void setDCMGainsFromPoleAssignment(double alpha, double beta, double gamma, double omega_zmp);
   
-  /** Compute desired wrench based on DCM error. */
+  /** Compute desired wrench based on DCM balance controller. */
   void computeDesiredWrench();
+  
+  /** Distribute a desired wrench in double support.
+   *
+   * \param desiredWrench Desired resultant reaction wrench.
+   */
+  void distributeWrench(const sva::ForceVecd & desiredWrench);
 
   /** Distribute a desired wrench in double support.
    *
@@ -613,18 +653,56 @@ private:
    */
   void distributeWrench();
   
-  /** set admittance gains:mass, damping and stiffness for each foot. */
-  void setFootImpedanceGains();
-  
-  /** register force sensors on contact foot. */
-  void updateFootSensors();
-  
-  /** Apply foot admittance control for each foot. */
-  void updateFootImpedanceControl();
-  
+  /** Project desired wrench to single support foot.
+   *
+   * \param desiredWrench Desired resultant reaction wrench.
+   *
+   * \param footTask Target foot.
+   *
+   * \param target contact
+   */
+  void saturateWrench(const sva::ForceVecd & desiredWrench,
+                      std::shared_ptr<mc_tasks::force::CoPTask> & footTask,
+                      const internal::Contact & contact);
+
+  /** Reset admittance, damping and stiffness for every foot in contact. */
+  void setSupportFootGains();
+
+  /** Update CoM task with ZMP Compensation Control.
+   *
+   * This approach is based on Section 6.2.2 of Dr Nagasaka's PhD thesis
+   * "体幹位置コンプライアンス制御によるモデル誤差吸収" (1999) from
+   * <https://sites.google.com/site/humanoidchannel/home/publication>.
+   * The main differences is that the CoM offset is (1) implemented as CoM
+   * damping control with an internal leaky integrator and (2) computed from
+   * the distributed rather than reference ZMP.
+   *
+   */
+  void updateCoMTaskZMPCC();
+
+  /** Apply foot force difference control.
+   *
+   * This method is described in Section III.E of "Biped walking
+   * stabilization based on linear inverted pendulum tracking" (Kajita et
+   * al., IROS 2010).
+   */
+  void updateFootForceDifferenceControl();
+
   /** Update ZMP frame from contact state. */
   void updateZMPFrame();
-  
+
+  /** Get 6D contact admittance vector from 2D CoP admittance. */
+  inline sva::ForceVecd contactAdmittance() const noexcept
+  {
+    return {{c_.copAdmittance.y(), c_.copAdmittance.x(), 0.}, {0., 0., 0.}};
+  }
+
+  inline void zmpcc(const ZMPCCConfiguration & zmpccConfig) noexcept
+  {
+    c_.zmpcc = zmpccConfig;
+    zmpcc_.configure(zmpccConfig);
+  }
+
   /** @brief External wrench. */
   struct ExternalWrench
   {
@@ -714,33 +792,24 @@ protected:
       return static_cast<std::size_t>(t);
     }
   };
-  
   std::unordered_map<ContactState,
-    internal::Contact,
-    EnumClassHash,
-    std::equal_to<ContactState>,
-    Eigen::aligned_allocator<std::pair<const ContactState, internal::Contact>>>
-    contacts_;
-  
-  std::unordered_map<ContactState,
-    std::tuple<ImpedanceType, double, double>,
-    EnumClassHash>  walking_phase_;
-  
-  /*! \brief Tasks for foot. */
-  std::unordered_map<ContactState,
-    std::shared_ptr<mc_tasks::force::ImpedanceTask>,
-    EnumClassHash> footTasks_;
-  
+                     internal::Contact,
+                     EnumClassHash,
+                     std::equal_to<ContactState>,
+                     Eigen::aligned_allocator<std::pair<const ContactState, internal::Contact>>>
+      contacts_;
   std::vector<ContactState> addContacts_; /**< Contacts to add to the QPSolver when the task is inserted */
-  std::vector<std::string> footSensors_; /** Force sensors corresponding to established contacts */
-  
+  std::unordered_map<ContactState, std::shared_ptr<mc_tasks::force::CoPTask>, EnumClassHash> footTasks;
+  std::vector<std::shared_ptr<mc_tasks::force::CoPTask>> contactTasks; /** Foot tasks for the established contacts */
+  std::vector<std::string> contactSensors; /** Force sensors corresponding to established contacts */
+
   std::vector<std::vector<Eigen::Vector3d>> supportPolygons_; /**< For GUI display */
   std::shared_ptr<computational_geometry::SupportPolygonManager<ContactState> > spm_;
   Eigen::Vector2d supportMin_ = Eigen::Vector2d::Zero();
   Eigen::Vector2d supportMax_ = Eigen::Vector2d::Zero();
-  std::shared_ptr<mc_tasks::CoMTask> comTask_;
-  std::shared_ptr<mc_tasks::OrientationTask> pelvisTask_; /**< Pelvis orientation task */
-  std::shared_ptr<mc_tasks::OrientationTask> torsoTask_; /**< Torso orientation task */
+  std::shared_ptr<mc_tasks::CoMTask> comTask;
+  std::shared_ptr<mc_tasks::OrientationTask> pelvisTask; /**< Pelvis orientation task */
+  std::shared_ptr<mc_tasks::OrientationTask> torsoTask; /**< Torso orientation task */
   const mc_rbdyn::Robots & robots_;
   const mc_rbdyn::Robots & realRobots_;
   unsigned int robotIndex_;
@@ -769,19 +838,23 @@ protected:
    * update(solver) call */
   bool reconfigure_ = true;
   bool enabled_ = true; /** Whether the stabilizer is enabled */
-  
-  Eigen::Vector3d dcmErrorSum_ = Eigen::Vector3d::Zero();
+
   Eigen::Vector3d dcmError_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d dcmVelError_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d dcmErrorSum_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d measuredCoM_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d measuredCoMd_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d measuredCoMdd_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d measuredZMP_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d measuredDCM_ = Eigen::Vector3d::Zero(); /// Measured DCM (only used for logging)
   Eigen::Vector3d measuredDCMUnbiased_ = Eigen::Vector3d::Zero(); /// DCM unbiased (only used for logging)
   sva::ForceVecd measuredNetWrench_ = sva::ForceVecd::Zero();
-  
+
   bool zmp_limit_over_ = false;
   
+  bool zmpccOnlyDS_ = true; /**< Only apply ZMPCC in double support */
+  ZMPCC zmpcc_; /**< Compute CoM offset due to ZMPCC compensation */
+
   /**
    * Filtering of the divergent component of motion (DCM)
    * and estimation of a bias betweeen the DCM and the corresponding zero moment point for a linearized inverted
@@ -790,7 +863,7 @@ protected:
   stateObservation::LipmDcmEstimator dcmEstimator_;
   /**< Whether the estimator needs to be reset (robot in the air, initialization) */
   bool dcmEstimatorNeedsReset_ = true;
-  
+
   /** @name Members related to stabilization in the presence of external wrenches
    *
    *  Adding an offset to the CoM for the predictable / measurable external wrenches on the robot surface.
@@ -805,24 +878,28 @@ protected:
   Eigen::Vector3d comOffsetErrCoM_ = Eigen::Vector3d::Zero(); /**< CoM offset error handled by CoM modification */
   Eigen::Vector3d comOffsetErrZMP_ = Eigen::Vector3d::Zero(); /**< CoM offset error handled by ZMP modification */
   mc_filter::LowPass<sva::ForceVecd>
-    extWrenchSumLowPass_; /**< Low-pass filter of the sum of the measured external wrenches */
+      extWrenchSumLowPass_; /**< Low-pass filter of the sum of the measured external wrenches */
   mc_filter::LowPass<Eigen::Vector3d> comOffsetLowPass_; /**< Low-pass filter of CoM offset */
   mc_filter::LowPass<Eigen::Vector3d>
-    comOffsetLowPassCoM_; /**< Low-pass filter of CoM offset to extract CoM modification */
+      comOffsetLowPassCoM_; /**< Low-pass filter of CoM offset to extract CoM modification */
   mc_filter::StationaryOffset<Eigen::Vector3d> comOffsetDerivator_; /**< Derivator of CoM offset */
   /** @} */
-  
+
+  mc_filter::ExponentialMovingAverage<Eigen::Vector3d> dcmIntegrator_;
   mc_filter::StationaryOffset<Eigen::Vector3d> dcmDerivator_;
   bool inTheAir_ = false; /**< Is the robot in the air? */
+  double dfzForceError_ = 0.; /**< Force error in foot force difference control */
+  double dfzHeightError_ = 0.; /**< Height error in foot force difference control */
   double dt_ = 0.005; /**< Controller cycle in [s] */
   double leftFootRatio_ = 0.5; /**< Weight distribution ratio (0: all weight on right foot, 1: all on left foot) */
   double mass_ = 38.; /**< Robot mass in [kg] */
   double runTime_ = 0.;
-  
+  double vdcHeightError_ = 0.; /**< Average height error used in vertical drift compensation */
+  sva::ForceVecd desiredWrench_ = sva::ForceVecd::Zero(); /**< Result of the DCM feedback */
   sva::ForceVecd distribWrench_ = sva::ForceVecd::Zero(); /**< Result of the force distribution QP */
   Eigen::Vector3d modifiedZMP_ = Eigen::Vector3d::Zero(); /**< zmpTarget + dcm controller */
   Eigen::Vector3d distribZMP_ =
-    Eigen::Vector3d::Zero(); /**< ZMP corresponding to force distribution result (desired ZMP) */
+      Eigen::Vector3d::Zero(); /**< ZMP corresponding to force distribution result (desired ZMP) */
   Eigen::Vector3d uncompTorque_ =
     Eigen::Vector3d::Zero(); /**< Uncompensated torque different from modifiedZMP_ and distribZMP_ */
   sva::PTransformd zmpFrame_ = sva::PTransformd::Identity(); /**< Frame in which the ZMP is computed */

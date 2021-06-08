@@ -147,8 +147,17 @@ namespace computational_geometry{
       double dmin = 1.0e30;
       Eigen::Vector3d c_point;
       for( unsigned int i = 0 ; i < m_vertices_hull.size()-1 ; i++ ){
-        double d = fabs(pointToSegment(closest_point, check_point,
-                                       m_vertices_hull[i], m_vertices_hull[i]));
+        double d = fabs(pointToSegment(c_point, check_point,
+                                       m_vertices_hull[i], m_vertices_hull[i+1]));
+        
+        if( dmin > d ){
+          dmin = d;
+          closest_point = c_point;
+        }
+      }
+      {
+        double d = fabs(pointToSegment(c_point, check_point,
+                                       m_vertices_hull.back(), m_vertices_hull.front()));
         
         if( dmin > d ){
           dmin = d;

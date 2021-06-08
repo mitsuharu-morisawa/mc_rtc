@@ -1,6 +1,7 @@
 #ifndef __SUPPORT_POLYGON_MANAGER__
 #define __SUPPORT_POLYGON_MANAGER__
 
+#include <unordered_map>
 #include "VerticesInfo.h"
 
 namespace computational_geometry{

@@ -1,8 +1,8 @@
 /*
  * Copyright 2015-2021 CNRS-UM LIRMM, CNRS-AIST JRL
  *
- * This file is extracted hmc2's stabilizer as part of
- * hmc2 <https://github.com/isri-aist/hmc2>
+ * This file is modified mainly force distribution 
+ * based on Kajita, et al IROS'10
  */
 
 #include <mc_filter/utils/clamp.h>
@@ -26,74 +26,44 @@ using ::mc_filter::utils::clampInPlaceAndWarn;
 namespace constants = ::mc_rtc::constants;
 
 DCMStabilizerTask::DCMStabilizerTask(const mc_rbdyn::Robots & robots,
-                                     const mc_rbdyn::Robots & realRobots,
-                                     unsigned int robotIndex,
-                                     const std::string & leftSurface,
-                                     const std::string & rightSurface,
-                                     const std::string & torsoBodyName,
-                                     double dt)
+                                       const mc_rbdyn::Robots & realRobots,
+                                       unsigned int robotIndex,
+                                       const std::string & leftSurface,
+                                       const std::string & rightSurface,
+                                       const std::string & torsoBodyName,
+                                       double dt)
 : robots_(robots), realRobots_(realRobots), robotIndex_(robotIndex), dcmEstimator_(dt),
-  extWrenchSumLowPass_(dt, /* cutoffPeriod = */ 0.05),
-  comOffsetLowPass_(dt, /* cutoffPeriod = */ 0.05),
-  comOffsetLowPassCoM_(dt, /* cutoffPeriod = */ 1.0),
-  comOffsetDerivator_(dt, /* timeConstant = */ 1.),
-  dcmDerivator_(dt, /* timeConstant = */ 1.),
-  dt_(dt),
+  extWrenchSumLowPass_(dt, /* cutoffPeriod = */ 0.05), comOffsetLowPass_(dt, /* cutoffPeriod = */ 0.05),
+  comOffsetLowPassCoM_(dt, /* cutoffPeriod = */ 1.0), comOffsetDerivator_(dt, /* timeConstant = */ 1.),
+  dcmIntegrator_(dt, /* timeConstant = */ 15.), dcmDerivator_(dt, /* timeConstant = */ 1.), dt_(dt),
   mass_(robots.robot(robotIndex).mass())
 {
-  std::cout << "rightSurface = " << rightSurface << std::endl;
-  std::cout << "leftSurface = " << leftSurface << std::endl;
-  
   type_ = "dcm_stabilizer";
   name_ = type_ + "_" + robots.robot(robotIndex).name();
   
   spm_ = std::make_shared<computational_geometry::SupportPolygonManager<ContactState> >();
-
-  comTask_.reset(new mc_tasks::CoMTask(robots, robotIndex_));
   
-#if 0
-  footTasks_[ContactState::Left]
-    = std::allocate_shared<mc_tasks::force::ImpedanceTask>(Eigen::aligned_allocator<mc_tasks::force::ImpedanceTask>{},
-                                                           leftSurface, robots, robotIndex_);
-  footTasks_[ContactState::Right]
-    =  std::allocate_shared<mc_tasks::force::ImpedanceTask>(Eigen::aligned_allocator<mc_tasks::force::ImpedanceTask>{},
-                                                            rightSurface, robots, robotIndex_);
-#endif
-  footTasks_[ContactState::Left] = std::make_shared<mc_tasks::force::ImpedanceTask>(leftSurface, robots, robotIndex_);
-  footTasks_[ContactState::Right] =  std::make_shared<mc_tasks::force::ImpedanceTask>(rightSurface, robots, robotIndex_);
+  comTask.reset(new mc_tasks::CoMTask(robots, robotIndex_));
+  auto leftCoP = std::allocate_shared<mc_tasks::force::CoPTask>(Eigen::aligned_allocator<mc_tasks::force::CoPTask>{},
+                                                                leftSurface, robots, robotIndex_);
+  auto rightCoP = std::allocate_shared<mc_tasks::force::CoPTask>(Eigen::aligned_allocator<mc_tasks::force::CoPTask>{},
+                                                                 rightSurface, robots, robotIndex_);
+  footTasks[ContactState::Left] = leftCoP;
+  footTasks[ContactState::Right] = rightCoP;
   
   std::string pelvisBodyName = robot().mb().body(0).name();
-  pelvisTask_ = std::make_shared<mc_tasks::OrientationTask>(pelvisBodyName, robots_, robotIndex_);
-  torsoTask_ = std::make_shared<mc_tasks::OrientationTask>(torsoBodyName, robots_, robotIndex_);
-
-  // TODO: default value should be set by config
-  footMass(ImpedanceType::Stand, {{1, 1, 1}, {50, 50, 50}}, true);
-  footDamping(ImpedanceType::Stand, {{100, 100, 100}, {50*400, 50*400, 50*100}}, true);
-  footStiffness(ImpedanceType::Stand, {{0, 0, 400}, {0, 0, 0}}, true);
-  footWrench(ImpedanceType::Stand, {{1, 1, 0}, {1, 1, 1}}, true);
+  pelvisTask = std::make_shared<mc_tasks::OrientationTask>(pelvisBodyName, robots_, robotIndex_);
+  torsoTask = std::make_shared<mc_tasks::OrientationTask>(torsoBodyName, robots_, robotIndex_);
   
-  footMass(ImpedanceType::DoubleSupport, {{1, 1, 1}, {50, 50, 50}});
-  footDamping(ImpedanceType::DoubleSupport, {{100, 100, 100}, {50*400, 50*400, 50*30}});
-  footStiffness(ImpedanceType::DoubleSupport, {{0, 0, 400}, {0, 0, 0}});
-  footWrench(ImpedanceType::DoubleSupport, {{1, 1, 0}, {1, 1, 1}});
-
-  footMass(ImpedanceType::SingleSupport, {{1, 1, 1}, {100, 100, 100}});
-  footDamping(ImpedanceType::SingleSupport, {{100, 100, 100}, {100*30, 100*30, 100*30}});
-  footStiffness(ImpedanceType::SingleSupport, {{0, 0, 0}, {100*225, 100*225, 100*225}});
-  footWrench(ImpedanceType::SingleSupport, {{1, 1, 0}, {0, 0, 0}});
-  
-  footMass(ImpedanceType::Swing, {{1, 1, 1}, {10, 10, 10}});
-  footDamping(ImpedanceType::Swing, {{40, 40, 40}, {10*30, 10*30, 10*30}});
-  footStiffness(ImpedanceType::Swing, {{400, 400, 400}, {10*225, 10*225, 10*225}});
-  footWrench(ImpedanceType::Swing, {{0, 0, 0}, {0, 0, 0}});
-  
-  footMass(ImpedanceType::Air, {{1, 1, 1}, {10, 10, 10}});
-  footDamping(ImpedanceType::Air, {{30, 30, 30}, {10*30, 10*30, 10*30}});
-  footStiffness(ImpedanceType::Air, {{100, 100, 100}, {10*100, 10*100, 10*100}});
-  footWrench(ImpedanceType::Air, {{0, 0, 0}, {0, 0, 0}});
-  
-  walkingPhase(ContactState::Left, ImpedanceType::Stand, dt, 0.0);
-  walkingPhase(ContactState::Right, ImpedanceType::Stand, dt, 0.0);
+  // Rename the tasks managed by the stabilizerxo
+  // Doing so helps making the logs more consistent, and having a fixed name
+  // allows for predifined custom plots in the log ui.
+  const auto n = name_ + "_Tasks";
+  comTask->name(n + "_com");
+  leftCoP->name(n + "_cop_left");
+  rightCoP->name(n + "_cop_right");
+  pelvisTask->name(n + "_pelvis");
+  torsoTask->name(n + "_torso");
 }
   
 DCMStabilizerTask::DCMStabilizerTask(const mc_rbdyn::Robots & robots,
@@ -115,25 +85,32 @@ DCMStabilizerTask::DCMStabilizerTask(const mc_rbdyn::Robots & robots,
 void DCMStabilizerTask::reset()
 {
   t_ = 0;
-  comTask_->reset();
-  comTarget_ = comTask_->com();
+  comTask->reset();
+  comTarget_ = comTask->com();
   comTargetRaw_ = comTarget_;
   zmpTarget_ = Eigen::Vector3d{comTarget_.x(), comTarget_.y(), 0.};
   zmpdTarget_ = Eigen::Vector3d::Zero();
 
-  for(auto footT : footTasks_)
+  for(auto footTask : footTasks)
   {
-    footT.second->reset();
+    footTask.second->reset();
   }
 
-  pelvisTask_->reset();
-  torsoTask_->reset();
-  
-  dcmErrorSum_ = Eigen::Vector3d::Zero();
+  pelvisTask->reset();
+  torsoTask->reset();
+
   dcmError_ = Eigen::Vector3d::Zero();
   dcmVelError_ = Eigen::Vector3d::Zero();
+  dfzForceError_ = 0.;
+  dfzHeightError_ = 0.;
+  desiredWrench_ = sva::ForceVecd::Zero();
   distribWrench_ = sva::ForceVecd::Zero();
-  
+  vdcHeightError_ = 0.;
+
+  zmpcc_.reset();
+
+  dcmEstimatorNeedsReset_ = true;
+
   extWrenches_.clear();
   extWrenchSumTarget_ = sva::ForceVecd::Zero();
   extWrenchSumMeasured_ = sva::ForceVecd::Zero();
@@ -142,12 +119,14 @@ void DCMStabilizerTask::reset()
   comOffsetErr_ = Eigen::Vector3d::Zero();
   comOffsetErrCoM_ = Eigen::Vector3d::Zero();
   comOffsetErrZMP_ = Eigen::Vector3d::Zero();
+  extWrenchSumLowPass_.reset(sva::ForceVecd::Zero());
   comOffsetLowPass_.reset(Eigen::Vector3d::Zero());
   comOffsetLowPassCoM_.reset(Eigen::Vector3d::Zero());
   comOffsetDerivator_.reset(Eigen::Vector3d::Zero());
-  
+
   dcmDerivator_.reset(Eigen::Vector3d::Zero());
-  
+  dcmIntegrator_.reset(Eigen::Vector3d::Zero());
+
   omega_ = std::sqrt(constants::gravity.z() / robot().com().z());
   commitConfig();
 }
@@ -163,8 +142,8 @@ Eigen::VectorXd DCMStabilizerTask::dimWeight() const
 }
 
 void DCMStabilizerTask::selectActiveJoints(mc_solver::QPSolver & /* solver */,
-                                           const std::vector<std::string> & /* activeJointsName */,
-                                           const std::map<std::string, std::vector<std::array<int, 2>>> & /* activeDofs */)
+                                        const std::vector<std::string> & /* activeJointsName */,
+                                        const std::map<std::string, std::vector<std::array<int, 2>>> & /* activeDofs */)
 {
   mc_rtc::log::error_and_throw<std::runtime_error>("Task {} does not implement selectActiveJoints. Please configure it "
                                                    "through the stabilizer configuration instead",
@@ -192,24 +171,24 @@ void DCMStabilizerTask::resetJointsSelector(mc_solver::QPSolver & /* solver */)
 
 Eigen::VectorXd DCMStabilizerTask::eval() const
 {
-  Eigen::VectorXd res(3 + 3 * footTasks_.size());
-  res.head(3) = comTask_->eval();
+  Eigen::VectorXd res(3 + 3 * contactTasks.size());
+  res.head(3) = comTask->eval();
   int i = 0;
-  for(const auto & footT : footTasks_)
+  for(const auto & task : contactTasks)
   {
-    res.segment(3 + 3 * i++, 3) = footT.second->eval();
+    res.segment(3 + 3 * i++, 3) = task->eval();
   }
   return res;
 }
 
 Eigen::VectorXd DCMStabilizerTask::speed() const
 {
-  Eigen::VectorXd res(3 + 3 * footTasks_.size());
-  res.head(3) = comTask_->speed();
+  Eigen::VectorXd res(3 + 3 * contactTasks.size());
+  res.head(3) = comTask->speed();
   int i = 0;
-  for(const auto & footT : footTasks_)
+  for(const auto & task : contactTasks)
   {
-    res.segment(3 + 3 * i++, 3) = footT.second->speed();
+    res.segment(3 + 3 * i++, 3) = task->speed();
   }
   return res;
 }
@@ -217,36 +196,48 @@ Eigen::VectorXd DCMStabilizerTask::speed() const
 void DCMStabilizerTask::addToSolver(mc_solver::QPSolver & solver)
 {
   // Feet tasks are added in update() instead, add all other tasks now
-  MetaTask::addToSolver(*comTask_, solver);
-  MetaTask::addToSolver(*pelvisTask_, solver);
-  MetaTask::addToSolver(*torsoTask_, solver);
-  for(const auto footT : footTasks_)
-  {
-    MetaTask::addToSolver(*(footT.second), solver);
-  }
+  MetaTask::addToSolver(*comTask, solver);
+  MetaTask::addToSolver(*pelvisTask, solver);
+  MetaTask::addToSolver(*torsoTask, solver);
 }
 
 void DCMStabilizerTask::removeFromSolver(mc_solver::QPSolver & solver)
 {
-  MetaTask::removeFromSolver(*comTask_, solver);
-  MetaTask::removeFromSolver(*pelvisTask_, solver);
-  MetaTask::removeFromSolver(*torsoTask_, solver);
-  for(const auto footT : footTasks_)
+  MetaTask::removeFromSolver(*comTask, solver);
+  MetaTask::removeFromSolver(*pelvisTask, solver);
+  MetaTask::removeFromSolver(*torsoTask, solver);
+  for(const auto footTask : contactTasks)
   {
-    MetaTask::removeFromSolver(*(footT.second), solver);
+    MetaTask::removeFromSolver(*footTask, solver);
   }
 }
 
-void DCMStabilizerTask::updateFootSensors()
+void DCMStabilizerTask::updateContacts(mc_solver::QPSolver & solver)
 {
-  footSensors_.clear();
-  for(const auto contact : contacts_)
+  if(!addContacts_.empty())
   {
-    if( inContact(contact.first) ){
-      auto footTask = footTasks_[contact.first];
-      const auto & fs = robot().indirectSurfaceForceSensor(footTask->surface());
-      footSensors_.push_back(fs.name());
+    // Remove previous contacts
+    for(const auto & contactT : contactTasks)
+    {
+      mc_rtc::log::info("{}: Removing contact {}", name(), contactT->surface());
+      MetaTask::removeFromLogger(*contactT, *solver.logger());
+      MetaTask::removeFromSolver(*contactT, solver);
     }
+    contactTasks.clear();
+    contactSensors.clear();
+
+    // Add new contacts
+    for(const auto contactState : addContacts_)
+    {
+      auto footTask = footTasks[contactState];
+      mc_rtc::log::info("{}: Adding contact {}", name(), footTask->surface());
+      MetaTask::addToSolver(*footTask, solver);
+      MetaTask::addToLogger(*footTask, *solver.logger());
+      contactTasks.push_back(footTask);
+      const auto & fs = robot().indirectSurfaceForceSensor(footTask->surface());
+      contactSensors.push_back(fs.name());
+    }
+    addContacts_.clear();
   }
 }
 
@@ -256,22 +247,24 @@ void DCMStabilizerTask::update(mc_solver::QPSolver & solver)
   if(!enabled_)
   {
     c_ = lastConfig_;
+    zmpcc_.configure(c_.zmpcc);
   }
   if(reconfigure_) configure_(solver);
-  
-  updateFootSensors();
-  
+
+  // Update contacts if they have changed
+  updateContacts(solver);
+
   updateState(realRobots_.robot().com(), realRobots_.robot().comVelocity());
-  
+
   // Run stabilizer
   run();
-  
-  MetaTask::update(*comTask_, solver);
-  MetaTask::update(*pelvisTask_, solver);
-  MetaTask::update(*torsoTask_, solver);
-  for(const auto footT : footTasks_)
+
+  MetaTask::update(*comTask, solver);
+  MetaTask::update(*pelvisTask, solver);
+  MetaTask::update(*torsoTask, solver);
+  for(const auto footTask : contactTasks)
   {
-    MetaTask::update(*(footT.second), solver);
+    MetaTask::update(*footTask, solver);
   }
 
   t_ += dt_;
@@ -283,13 +276,16 @@ void DCMStabilizerTask::enable()
   // Reset DCM integrator when enabling the stabilizer.
   // While idle, it will accumulate a lot of error, and would case the robot to
   // move suddently to compensate it otherwise
+  dcmIntegrator_.reset(Eigen::Vector3d::Zero());
   dcmDerivator_.reset(Eigen::Vector3d::Zero());
-  
+
+  extWrenchSumLowPass_.reset(sva::ForceVecd::Zero());
   comOffsetLowPass_.reset(Eigen::Vector3d::Zero());
   comOffsetLowPassCoM_.reset(Eigen::Vector3d::Zero());
   comOffsetDerivator_.reset(Eigen::Vector3d::Zero());
-  
+
   configure(lastConfig_);
+  zmpcc_.enabled(true);
   enabled_ = true;
 }
 
@@ -299,9 +295,14 @@ void DCMStabilizerTask::disable()
   // Save current configuration to be reused when re-enabling
   lastConfig_ = c_;
   // Set the stabilizer gains to zero
+  c_.copAdmittance.setZero();
   c_.dcmDerivGain = 0.;
   c_.dcmIntegralGain = 0.;
   c_.dcmPropGain = 0.;
+  c_.dfzAdmittance = 0.;
+  c_.vdcFrequency = 0.;
+  c_.vdcStiffness = 0.;
+  zmpcc_.enabled(false);
   enabled_ = false;
 }
 
@@ -329,39 +330,39 @@ void DCMStabilizerTask::commitConfig()
 void DCMStabilizerTask::configure_(mc_solver::QPSolver & solver)
 {
   dcmDerivator_.timeConstant(c_.dcmDerivatorTimeConstant);
+  dcmIntegrator_.timeConstant(c_.dcmIntegratorTimeConstant);
+  dcmIntegrator_.saturation(c_.safetyThresholds.MAX_AVERAGE_DCM_ERROR);
 
-  
   extWrenchSumLowPass_.cutoffPeriod(c_.extWrench.extWrenchSumLowPassCutoffPeriod);
   comOffsetLowPass_.cutoffPeriod(c_.extWrench.comOffsetLowPassCutoffPeriod);
   comOffsetLowPassCoM_.cutoffPeriod(c_.extWrench.comOffsetLowPassCoMCutoffPeriod);
   comOffsetDerivator_.timeConstant(c_.extWrench.comOffsetDerivatorTimeConstant);
 
   // // Configure upper-body tasks
-  pelvisTask_->stiffness(c_.pelvisStiffness);
-  pelvisTask_->weight(c_.pelvisWeight);
+  pelvisTask->stiffness(c_.pelvisStiffness);
+  pelvisTask->weight(c_.pelvisWeight);
 
-  torsoTask_->stiffness(c_.torsoStiffness);
-  torsoTask_->weight(c_.torsoWeight);
-  torsoTask_->orientation(mc_rbdyn::rpyToMat({0, c_.torsoPitch, 0}));
+  torsoTask->stiffness(c_.torsoStiffness);
+  torsoTask->weight(c_.torsoWeight);
+  torsoTask->orientation(mc_rbdyn::rpyToMat({0, c_.torsoPitch, 0}));
+
+  zmpcc_.configure(c_.zmpcc);
 
   if(!c_.comActiveJoints.empty())
   {
-    comTask_->selectActiveJoints(solver, c_.comActiveJoints);
+    comTask->selectActiveJoints(solver, c_.comActiveJoints);
   }
-  comTask_->setGains(c_.comStiffness, 2 * c_.comStiffness.cwiseSqrt());
-  comTask_->weight(c_.comWeight);
+  comTask->setGains(c_.comStiffness, 2 * c_.comStiffness.cwiseSqrt());
+  comTask->weight(c_.comWeight);
 
-  for(const auto & footT : footTasks_)
+  for(const auto & footTask : footTasks)
   {
-    if(c_.cutoffRatio > 0.0 )
-      footT.second->cutoffPeriod(dt_/c_.cutoffRatio);
-    footT.second->setGains(c_.footMotionStiffness, sva::MotionVecd(2 * c_.footMotionStiffness.angular().cwiseSqrt(),
-                                                                   2 * c_.footMotionStiffness.linear().cwiseSqrt()) );
-    footT.second->weight(c_.footWeight);
+    footTask.second->maxLinearVel(c_.copMaxVel.linear());
+    footTask.second->maxAngularVel(c_.copMaxVel.angular());
   }
   
   dcmBiasEstimatorConfiguration(c_.dcmBias);
-  
+
   reconfigure_ = false;
 }
 
@@ -395,7 +396,7 @@ void DCMStabilizerTask::load(mc_solver::QPSolver &, const mc_rtc::Configuration 
     for(const auto & contactName : contacts)
     {
       ContactState s = contactName;
-      sva::PTransformd contactPose = footTasks_[s]->surfacePose();
+      sva::PTransformd contactPose = footTasks[s]->surfacePose();
       if(config.has(contactName))
       {
         const auto & c = config(contactName);
@@ -419,11 +420,11 @@ void DCMStabilizerTask::load(mc_solver::QPSolver &, const mc_rtc::Configuration 
           height = (height + h) / 2;
         }
       }
-      contactsToAdd.push_back({s, {robot(), footTasks_[s]->surface(), contactPose, c_.friction}});
+      contactsToAdd.push_back({s, {robot(), footTasks[s]->surface(), contactPose, c_.friction}});
     }
   }
   this->setContacts(contactsToAdd);
-  
+
   // Target robot com by default
   Eigen::Vector3d comTarget = robot().com();
   if(config.has("staticTarget"))
@@ -433,7 +434,6 @@ void DCMStabilizerTask::load(mc_solver::QPSolver &, const mc_rtc::Configuration 
       comTarget = config("staticTarget")("com");
     }
   }
-  
   this->staticTarget(comTarget, height);
 
   // Allow to start in disabled state
@@ -459,8 +459,8 @@ void DCMStabilizerTask::setContacts(const std::vector<ContactState> & contacts)
   for(const auto contact : contacts)
   {
     addContacts.push_back({contact,
-          {robot(), footTasks_[contact]->surface(),
-              robot().surfacePose(footTasks_[contact]->surface()), c_.friction}});
+                           {robot(), footTasks[contact]->surface(),
+                            realRobot().surfacePose(footTasks[contact]->surface()), c_.friction}});
   }
   setContacts(addContacts);
 }
@@ -470,11 +470,8 @@ void DCMStabilizerTask::setContacts(const std::vector<std::pair<ContactState, sv
   ContactDescriptionVector addContacts;
   for(const auto contact : contacts)
   {
-    addContacts.push_back({contact.first,
-          {robot(), footTasks_[contact.first]->surface(),
-              contact.second, c_.friction}});
+    addContacts.push_back({contact.first, {robot(), footTasks[contact.first]->surface(), contact.second, c_.friction}});
   }
-
   setContacts(addContacts);
 }
 
@@ -488,10 +485,11 @@ void DCMStabilizerTask::setContacts(const ContactDescriptionVector & contacts)
   }
   contacts_.clear();
   spm_->clear();
-  
+
   // Reset support area boundaries
   supportMin_ = std::numeric_limits<double>::max() * Eigen::Vector2d::Ones();
   supportMax_ = -supportMin_;
+  supportPolygons_.clear();
 
   for(const auto & contact : contacts)
   {
@@ -501,112 +499,61 @@ void DCMStabilizerTask::setContacts(const ContactDescriptionVector & contacts)
 
 void DCMStabilizerTask::addContact(ContactState contactState, const Contact & contact)
 {
-  auto footT = footTasks_[contactState];
-  addContacts_.push_back(contactState);
-  
+  auto footTask = footTasks[contactState];
   // Use real robot's surface pose as contact
   contacts_.emplace(std::make_pair(contactState, contact));
-  
+
   supportMin_.x() = std::min(contact.xmin(), supportMin_.x());
   supportMin_.y() = std::min(contact.ymin(), supportMin_.y());
   supportMax_.x() = std::max(contact.xmax(), supportMax_.x());
   supportMax_.y() = std::max(contact.ymax(), supportMax_.y());
-  
-  //std::cout << "size of contact.polygon() = " << contact.polygon().size() << std::endl;
-  
-  supportPolygons_.clear();
+
   supportPolygons_.push_back(contact.polygon());
-  spm_->addVertices(contactState, contact.polygon(), inContact(contactState));
+
+  // Configure support foot task
+  footTask->reset();
+  footTask->weight(c_.contactWeight);
+  footTask->targetPose(contact.surfacePose());
+
+  addContacts_.push_back(contactState);
+  spm_->addVertices(contactState, contact.polygon(), true);
 }
 
-// Todo set impedance gain according to contact phase
-void DCMStabilizerTask::setFootImpedanceGains()
+void DCMStabilizerTask::setSupportFootGains()
 {
-  ImpedanceType RightWalkingPhase = std::get<0>(walking_phase_[ContactState::Right]);
-  double RightWalkingPhaseDuration = std::get<1>(walking_phase_[ContactState::Right]);
-  double RightWalkingCurrentTime = std::get<2>(walking_phase_[ContactState::Right]);
-  footTasks_[ContactState::Right]->weight(c_.footWeight);
-  footTasks_[ContactState::Right]->gains().wrench().vec(c_.footWrench[RightWalkingPhase]);
-  footTasks_[ContactState::Right]->gains().M().vec(c_.footMass[RightWalkingPhase]);
-  footTasks_[ContactState::Right]->gains().D().vec(c_.footStiffness[RightWalkingPhase]);
-  footTasks_[ContactState::Right]->gains().K().vec(c_.footDamping[RightWalkingPhase]);
-  
-  ImpedanceType LeftWalkingPhase = std::get<0>(walking_phase_[ContactState::Left]);
-  double LeftWalkingPhaseDuration = std::get<1>(walking_phase_[ContactState::Left]);
-  double LeftWalkingCurrentTime = std::get<2>(walking_phase_[ContactState::Left]);
-  footTasks_[ContactState::Left]->weight(c_.footWeight);
-  footTasks_[ContactState::Left]->gains().wrench().vec(c_.footWrench[LeftWalkingPhase]);
-  footTasks_[ContactState::Left]->gains().M().vec(c_.footMass[LeftWalkingPhase]);
-  footTasks_[ContactState::Left]->gains().D().vec(c_.footStiffness[LeftWalkingPhase]);
-  footTasks_[ContactState::Left]->gains().K().vec(c_.footDamping[LeftWalkingPhase]);
+  if(inDoubleSupport())
+  {
+    for(auto contactT : contactTasks)
+    {
+      contactT->admittance(contactAdmittance());
+      contactT->setGains(c_.contactStiffness, c_.contactDamping);
+    }
+  }
+  else
+  {
+    sva::MotionVecd vdcContactStiffness = {c_.contactStiffness.angular(),
+                                           {c_.vdcStiffness, c_.vdcStiffness, c_.vdcStiffness}};
+    for(auto contactT : contactTasks)
+    {
+      contactT->admittance(contactAdmittance());
+      contactT->setGains(vdcContactStiffness, c_.contactDamping);
+    }
+  }
 }
 
 void DCMStabilizerTask::checkInTheAir()
 {
   inTheAir_ = true;
-  for(const auto footT : footTasks_)
+  for(const auto footT : footTasks)
   {
-    inTheAir_ = inTheAir_ && footT.second->measuredWrench().force().z() < c_.safetyThresholds.MIN_PRESSURE;
+    inTheAir_ = inTheAir_ && footT.second->measuredWrench().force().z() < c_.safetyThresholds.MIN_DS_PRESSURE;
   }
-}
-
-bool DCMStabilizerTask::calcForceDistributionRatio(Eigen::Matrix3d& Rfoot)
-{
-  bool limit_over = false;
-  
-  // Project desired ZMP in-between foot-sole ankle frames and compute ratio along the line in-beween the two surfaces
-  const Eigen::Vector3d & rfoot_pos = footTasks_.at(ContactState::Right)->targetPose().translation();
-  const Eigen::Vector3d & lfoot_pos = footTasks_.at(ContactState::Left)->targetPose().translation();
-  const Eigen::Vector3d p0(lfoot_pos - rfoot_pos);
-  const double length = sqrt(p0.x()*p0.x() + p0.y()*p0.y());
-  const double cth = p0.y() / length;
-  const double sth = p0.x() / length;
-  Rfoot <<
-    cth, -sth, 0.0,
-    sth,  cth, 0.0,
-    0.0,  0.0, 1.0;
-  
-  if( inDoubleSupport() ){
-    spm_->getGlobalAllSupportPolygon();
-
-    if( spm_->checkAllConvexHullInclusion(modifiedZMP_) ){
-      Eigen::Vector3d rfoot_pos_local = Rfoot * (rfoot_pos - modifiedZMP_);
-      Eigen::Vector3d lfoot_pos_local = Rfoot * (lfoot_pos - modifiedZMP_);
-      leftFootRatio_ = lfoot_pos_local.y() / (lfoot_pos_local.y()-rfoot_pos_local.y());
-    }
-    else{
-      //force distribution by the closed ZMP of support region
-      spm_->getClosestPointInAllSupportPolygon(distribZMP_, modifiedZMP_);
-      if( spm_->checkConvexHullInclusion(ContactState::Left, distribZMP_) )
-        leftFootRatio_ = 0.0;
-      else if( spm_->checkConvexHullInclusion(ContactState::Right, distribZMP_) )
-        leftFootRatio_ = 1.0;
-      else{
-        Eigen::Vector3d rfoot_pos_local2 = Rfoot * (rfoot_pos - distribZMP_);
-        Eigen::Vector3d lfoot_pos_local2 = Rfoot * (lfoot_pos - distribZMP_);
-        leftFootRatio_ = lfoot_pos_local2.y() / (lfoot_pos_local2.y()-rfoot_pos_local2.y());
-      }
-      limit_over = true;
-    }
-    clampInPlaceAndWarn(leftFootRatio_, 0.0, 1.0, "leftFootRatio");
-  }
-  else if( inContact(ContactState::Left) ){
-    leftFootRatio_ = 0.0;
-  }
-  else if( inContact(ContactState::Right) ){
-    leftFootRatio_ = 1.0;
-  }
-  
-  //std::cout << "leftFootRatio = " << leftFootRatio_ << std::endl;
-  
-  return limit_over;
 }
 
 sva::PTransformd DCMStabilizerTask::anchorFrame(const mc_rbdyn::Robot & robot) const
 {
-  return sva::interpolate(robot.surfacePose(footTasks_.at(ContactState::Left)->surface()),
-                          robot.surfacePose(footTasks_.at(ContactState::Right)->surface()),
-                          leftFootRatio_);
+  return sva::interpolate(robot.surfacePose(footTasks.at(ContactState::Left)->surface()),
+                          robot.surfacePose(footTasks.at(ContactState::Right)->surface()), leftFootRatio_);
 }
 
 void DCMStabilizerTask::updateZMPFrame()
@@ -620,12 +567,10 @@ void DCMStabilizerTask::updateZMPFrame()
   {
     zmpFrame_ = contacts_.at(ContactState::Left).surfacePose();
   }
-  else if(inContact(ContactState::Right))
+  else
   {
     zmpFrame_ = contacts_.at(ContactState::Right).surfacePose();
   }
-  
-  //std::cout << "zmpFrame = " << zmpFrame_.translation().transpose() << std::endl;
 }
 
 void DCMStabilizerTask::staticTarget(const Eigen::Vector3d & com, double zmpHeight)
@@ -636,10 +581,10 @@ void DCMStabilizerTask::staticTarget(const Eigen::Vector3d & com, double zmpHeig
 }
 
 void DCMStabilizerTask::target(const Eigen::Vector3d & com,
-                            const Eigen::Vector3d & comd,
-                            const Eigen::Vector3d & comdd,
-                            const Eigen::Vector3d & zmp,
-                            const Eigen::Vector3d & zmpd)
+                               const Eigen::Vector3d & comd,
+                               const Eigen::Vector3d & comdd,
+                               const Eigen::Vector3d & zmp,
+                               const Eigen::Vector3d & zmpd)
 {
   comTargetRaw_ = com;
   comTarget_ = comTargetRaw_ - comOffsetErrCoM_;
@@ -654,8 +599,6 @@ void DCMStabilizerTask::target(const Eigen::Vector3d & com,
   double comHeight = comTarget_.z() - zmpTarget_.z();
   omega_ = std::sqrt(constants::gravity.z() / comHeight);
   dcmTarget_ = comTarget_ + comdTarget_ / omega_;
-  
-  //std::cout << "zmpTarget = " << zmp.transpose() << std::endl;
 }
 
 void DCMStabilizerTask::setExternalWrenches(const std::vector<std::string> & surfaceNames,
@@ -756,21 +699,18 @@ void DCMStabilizerTask::run()
   using clock = typename std::conditional<std::chrono::high_resolution_clock::is_steady,
                                           std::chrono::high_resolution_clock, std::chrono::steady_clock>::type;
   auto startTime = clock::now();
-  
-  //c_.clampGains();
-  checkInTheAir();
 
-  setFootImpedanceGains();
+  c_.clampGains();
+  checkInTheAir();
+  
+  computeDesiredWrench();
+  distributeWrench();
+  
+  setSupportFootGains();
   updateZMPFrame();
   if(!inTheAir_)
   {
-    measuredNetWrench_ = robots_.robot(robotIndex_).netWrench(footSensors_);
-    
-#if 0
-    std::cout << "total force = " << measuredNetWrench_.force().transpose() << std::endl;
-    std::cout << "total torque = " << measuredNetWrench_.moment().transpose() << std::endl;
-#endif
-    
+    measuredNetWrench_ = robots_.robot(robotIndex_).netWrench(contactSensors);
     try
     {
       measuredZMP_ =
@@ -786,22 +726,31 @@ void DCMStabilizerTask::run()
     measuredNetWrench_ = sva::ForceVecd::Zero();
   }
   
-  computeDesiredWrench();
-  distributeWrench();
-  //distribZMP_ = mc_rbdyn::zmp(distribWrench_, zmpFrame_);
-  updateFootImpedanceControl();
+  if(inDoubleSupport())
+  {
+    
+  }
+  else if(inContact(ContactState::Left))
+  {
+    footTasks[ContactState::Right]->setZeroTargetWrench();
+  }
+  else
+  {
+    footTasks[ContactState::Left]->setZeroTargetWrench();
+  }
   
-  comTask_->com(comTarget_);
-  comTask_->refVel(comdTarget_);
-  comTask_->refAccel(comddTarget_);
-
+  updateFootForceDifferenceControl();
+  
+  comTask->com(comTarget_);
+  comTask->refVel(comdTarget_);
+  comTask->refAccel(comddTarget_);
+  
   // Update orientation tasks according to feet orientation
   sva::PTransformd X_0_a = anchorFrame(robot());
-  //Eigen::Matrix3d pelvisOrientation = X_0_a.rotation();
-  Eigen::Matrix3d pelvisOrientation = sva::RotZ(mc_rbdyn::rpyFromMat(X_0_a.rotation())[2]);
-  pelvisTask_->orientation(pelvisOrientation);
-  torsoTask_->orientation(mc_rbdyn::rpyToMat({0, c_.torsoPitch, 0}) * pelvisOrientation);
-  
+  Eigen::Matrix3d pelvisOrientation = X_0_a.rotation();
+  pelvisTask->orientation(pelvisOrientation);
+  torsoTask->orientation(mc_rbdyn::rpyToMat({0, c_.torsoPitch, 0}) * pelvisOrientation);
+
   auto endTime = clock::now();
   runTime_ = 1000. * duration_cast<duration<double>>(endTime - startTime).count();
 }
@@ -809,23 +758,25 @@ void DCMStabilizerTask::run()
 void DCMStabilizerTask::updateState(const Eigen::Vector3d & com, const Eigen::Vector3d & comd)
 {
   measuredCoM_ = com;
-  measuredCoMd_ = comd;
+  measuredCoMd_ += (comd - measuredCoMd_) * 0.3;
+  
+  static Eigen::Vector3d comd_pre(comd);
+  Eigen::Vector3d comdd((comd - comd_pre)/dt_);
+  measuredCoMdd_ += (comdd - measuredCoMdd_) * 0.1;
+  comd_pre = comd;
+  
   measuredDCM_ = measuredCoM_ + measuredCoMd_ / omega_;
-}
-
-void DCMStabilizerTask::setDCMGainsFromPoleAssignment(double alpha, double beta, double gamma, double omega_zmp)
-{
-  c_.dcmIntegralGain =  -alpha*beta*gamma/(omega_*omega_zmp);
-  c_.dcmPropGain = -(alpha*beta + beta*gamma + gamma*alpha + omega_*omega_zmp) / (omega_*omega_zmp);
-  c_.dcmDerivGain = -(alpha + beta + gamma + omega_ - omega_zmp) / (omega_*omega_zmp);
 }
 
 void DCMStabilizerTask::computeDesiredWrench()
 {
   Eigen::Vector3d comError = comTarget_ - measuredCoM_;
   Eigen::Vector3d comdError = comdTarget_ - measuredCoMd_;
+  Eigen::Vector3d comddError = comddTarget_ - measuredCoMdd_;
   dcmError_ = comError + comdError / omega_;
+  dcmVelError_ = comdError + comddError / omega_;
   dcmError_.z() = 0.;
+  dcmVelError_.z() = 0.;
   
   if( c_.hasDCMPoles )
     setDCMGainsFromPoleAssignment(c_.dcmPoles[0], c_.dcmPoles[1], c_.dcmPoles[2], c_.dcmFlexibility);
@@ -833,7 +784,9 @@ void DCMStabilizerTask::computeDesiredWrench()
   if(inTheAir_)
   {
     dcmDerivator_.reset(Eigen::Vector3d::Zero());
-    dcmErrorSum_ = Eigen::Vector3d::Zero();
+    dcmIntegrator_.append(Eigen::Vector3d::Zero());
+    dcmErrorSum_ .setZero();
+    dcmEstimatorNeedsReset_ = true;
   }
   else
   {
@@ -882,19 +835,26 @@ void DCMStabilizerTask::computeDesiredWrench()
       measuredDCMUnbiased_ = measuredDCM_;
       dcmEstimatorNeedsReset_ = true;
     }
-    
-    dcmDerivator_.update(dcmError_);
-    dcmErrorSum_ += dcmError_ * dt_;
-    dcmErrorSum_ = clamp(dcmErrorSum_, -c_.safetyThresholds.MAX_AVERAGE_DCM_ERROR, c_.safetyThresholds.MAX_AVERAGE_DCM_ERROR);
+
+    dcmDerivator_.update(omega_ * (dcmError_ - zmpError));
+    dcmIntegrator_.append(dcmError_);
   }
-  dcmVelError_ = dcmDerivator_.eval();
   
-  modifiedZMP_ = zmpTarget_;
-  modifiedZMP_ += c_.dcmPropGain * dcmError_;
-  //modifiedZMP_ += c_.dcmIntegralGain * dcmErrorSum_;
-  //modifiedZMP_ += c_.dcmDerivGain * dcmVelError_;
+  Eigen::Vector3d balanceZMP
+    = c_.dcmPropGain * dcmError_
+    + c_.dcmDerivGain * dcmVelError_
+    + c_.dcmIntegralGain * dcmErrorSum_;
   
-#if 0
+  for(int axis = 0 ; axis <= 1 ; axis++ ){
+    if( fabs(distribZMP_(axis) - modifiedZMP_(axis)) < 0.01 )
+      dcmErrorSum_(axis) += dcmError_(axis) * dt_;
+  }
+  dcmErrorSum_ = clamp(dcmErrorSum_,
+                       -fabs(c_.safetyThresholds.MAX_AVERAGE_DCM_ERROR/c_.dcmIntegralGain),
+                       +fabs(c_.safetyThresholds.MAX_AVERAGE_DCM_ERROR/c_.dcmIntegralGain));
+  
+  modifiedZMP_ = zmpTarget_ + c_.zmpdGain * zmpdTarget_  + balanceZMP;
+  
   // Calculate CoM offset from measured wrench
   for(auto & extWrench : extWrenches_)
   {
@@ -909,7 +869,7 @@ void DCMStabilizerTask::computeDesiredWrench()
     }
   }
   comOffsetMeasured_ = computeCoMOffset<&ExternalWrench::measured>(realRobot());
-
+  
   // Modify the desired CoM and ZMP depending on the external wrench error
   comOffsetLowPass_.update(comOffsetMeasured_ - comOffsetTarget_);
   comOffsetErr_ = comOffsetLowPass_.eval();
@@ -929,63 +889,133 @@ void DCMStabilizerTask::computeDesiredWrench()
                       Eigen::Vector3d::Constant(c_.extWrench.comOffsetErrZMPLimit).eval(), "comOffsetErrZMP");
   comOffsetDerivator_.update(comOffsetErr_);
   
+  distribZMP_ = modifiedZMP_;
+  
+#if 0
+  if(c_.extWrench.modifyZMPErr)
+  {
+    desiredCoMAccel -= omega_ * omega_ * comOffsetErrZMP_;
+  }
+  if(c_.extWrench.modifyZMPErrD)
+  {
+    desiredCoMAccel -= (omega_ * omega_ / c_.zmpdGain) * comOffsetDerivator_.eval();
+  }
+  
+  // Calculate the desired force and moment
+  Eigen::Vector3d desiredForce = mass_ * (desiredCoMAccel + constants::gravity);
+  Eigen::Vector3d desiredMoment = Eigen::Vector3d::Zero();
+
   // Subtract the external wrenches from the desired force and moment
   extWrenchSumTarget_ = computeExternalWrenchSum<&ExternalWrench::target>(robot(), comTarget_);
-  extWrenchSumMeasured_ = computeExternalWrenchSum<&ExternalWrench::measured>(realRobot(), measuredCoM_);
-  
+  extWrenchSumLowPass_.update(computeExternalWrenchSum<&ExternalWrench::measured>(realRobot(), measuredCoM_));
+  extWrenchSumMeasured_ = extWrenchSumLowPass_.eval();
   if(c_.extWrench.subtractMeasuredValue)
   {
-    Eigen::Vector3d extZMP = mc_rbdyn::zmp(extWrenchSumMeasured_, zmpFrame_);
-    modifiedZMP_ -= extZMP;
+    desiredForce -= extWrenchSumMeasured_.force();
+    desiredMoment -= extWrenchSumMeasured_.moment();
   }
   else
   {
-    Eigen::Vector3d extZMP = mc_rbdyn::zmp(extWrenchSumTarget_, zmpFrame_);
-    modifiedZMP_ -= extZMP;
+    desiredForce -= extWrenchSumTarget_.force();
+    desiredMoment -= extWrenchSumTarget_.moment();
   }
-#endif
   
   distribZMP_ = modifiedZMP_;
+    
+  // Previous implementation (up to v1.3):
+  // return {pendulum_.com().cross(desiredForce), desiredForce};
+  // See https://github.com/stephane-caron/lipm_walking_controller/issues/28
   
-  std::cout << "comError = " << comError.transpose() << std::endl;
-  std::cout << "comTarget = " << comTarget_.transpose() << std::endl;
-  std::cout << "measuredCoM = " << measuredCoM_.transpose() << std::endl;
+  return {measuredCoM_.cross(desiredForce) + desiredMoment, desiredForce};
+#endif
+}
 
-  std::cout << "comdError = " << comdError.transpose() << std::endl;
-  std::cout << "comdTarget = " << comdTarget_.transpose() << std::endl;
-  std::cout << "measuredCoMd = " << measuredCoMd_.transpose() << std::endl;
-
-  std::cout << "comddTarget = " << comddTarget_.transpose() << std::endl;
+bool DCMStabilizerTask::calcForceDistributionRatio(Eigen::Matrix3d& Rlocal)
+{
+  bool limit_over = false;
   
-  std::cout << "dcmError = " << dcmError_.transpose() << std::endl;
-  std::cout << "dcmVelError = " << dcmVelError_.transpose() << std::endl;
-  std::cout << "dcmErrorSum = " << dcmErrorSum_.transpose() << std::endl;
+  // Project desired ZMP in-between foot-sole ankle frames and compute ratio along the line in-beween the two surfaces
+  if( inDoubleSupport() ){
+    const auto & leftContact = contacts_.at(ContactState::Left);
+    const auto & rightContact = contacts_.at(ContactState::Right);
+    const Eigen::Vector3d & lfoot_pos = leftContact.anklePose().translation();
+    const Eigen::Vector3d & rfoot_pos = rightContact.anklePose().translation();
+    
+    const Eigen::Vector3d p0(lfoot_pos - rfoot_pos);
+    const double length = sqrt(p0.x()*p0.x() + p0.y()*p0.y());
+    const double cth = p0.y() / length;
+    const double sth = p0.x() / length;
+    Rlocal <<
+      cth, -sth, 0.0,
+      sth,  cth, 0.0,
+      0.0,  0.0, 1.0;
+    
+    spm_->getGlobalAllSupportPolygon();
+    if( spm_->checkAllConvexHullInclusion(modifiedZMP_) ){
+      Eigen::Vector3d rfoot_pos_local = Rlocal * (rfoot_pos - modifiedZMP_);
+      Eigen::Vector3d lfoot_pos_local = Rlocal * (lfoot_pos - modifiedZMP_);
+      leftFootRatio_ = lfoot_pos_local.y() / (lfoot_pos_local.y()-rfoot_pos_local.y());
+    }
+    else{
+      //force distribution by the closed ZMP of support region
+      spm_->getClosestPointInAllSupportPolygon(distribZMP_, modifiedZMP_);
+      if( spm_->checkConvexHullInclusion(ContactState::Left, distribZMP_) )
+        leftFootRatio_ = 0.0;
+      else if( spm_->checkConvexHullInclusion(ContactState::Right, distribZMP_) )
+        leftFootRatio_ = 1.0;
+      else{
+        Eigen::Vector3d rfoot_pos_local2 = Rlocal * (rfoot_pos - distribZMP_);
+        Eigen::Vector3d lfoot_pos_local2 = Rlocal * (lfoot_pos - distribZMP_);
+        leftFootRatio_ = lfoot_pos_local2.y() / (lfoot_pos_local2.y()-rfoot_pos_local2.y());
+      }
+      limit_over = true;
+    }
+    clamp(leftFootRatio_, 0.0, 1.0);
+  }
+  else if( inContact(ContactState::Left) )
+  {
+    leftFootRatio_ = 0.0;
+    
+    if( !spm_->checkConvexHullInclusion(ContactState::Left, modifiedZMP_) ){
+      spm_->getClosestPointInSupportPolygon(ContactState::Left, distribZMP_, modifiedZMP_);
+      limit_over = true;
+    }
+  }
+  else if( inContact(ContactState::Right) )
+  {
+    leftFootRatio_ = 1.0;
+    
+    if( !spm_->checkConvexHullInclusion(ContactState::Right, modifiedZMP_) ){
+      spm_->getClosestPointInSupportPolygon(ContactState::Right, distribZMP_, modifiedZMP_);
+      limit_over = true;
+    }
+  }
+  
+  return limit_over;
+}
+
+void DCMStabilizerTask::setDCMGainsFromPoleAssignment(double alpha, double beta, double gamma, double omega_zmp)
+{
+  c_.dcmIntegralGain =  -alpha*beta*gamma/(omega_*omega_zmp);
+  c_.dcmPropGain = -(alpha*beta + beta*gamma + gamma*alpha + omega_*omega_zmp) / (omega_*omega_zmp);
+  c_.dcmDerivGain = -(alpha + beta + gamma + omega_ - omega_zmp) / (omega_*omega_zmp);
 }
 
 void DCMStabilizerTask::distributeWrench()
 {
-  const sva::PTransformd & X_0_rc = footTasks_.at(ContactState::Right)->targetPose();
-  const sva::PTransformd & X_0_lc = footTasks_.at(ContactState::Left)->targetPose();
-  
-  Eigen::Matrix3d Rfoot;
+  Eigen::Matrix3d Rlocal = Eigen::Matrix3d::Identity();
   bool zmp_limit_over_prev = zmp_limit_over_;
-  zmp_limit_over_ = calcForceDistributionRatio(Rfoot);
+  zmp_limit_over_ = calcForceDistributionRatio(Rlocal);
   distribWrench_.force() = mass_ * (comddTarget_ + constants::gravity);
   distribWrench_.moment() = distribZMP_.cross(distribWrench_.force());
   
-#if 1
-  std::cout << "modifiedZMP = " << modifiedZMP_.transpose() << std::endl;
-  std::cout << "distibZMP = " << distribZMP_.transpose() << std::endl;
-#endif
-  
   if( zmp_limit_over_ ){
     if( !zmp_limit_over_ && zmp_limit_over_prev ){
-      std::cout << "recovery of zmp over at " << t_ << "[s]" << std::endl;
+      mc_rtc::log::warning("recovery of zmp over at {} [s]", t_);
     }
     else if( zmp_limit_over_ && !zmp_limit_over_prev ){
-      std::cout << "zmp over!! desired(" << modifiedZMP_.x() << "," << modifiedZMP_.y()
-                << "), actual(" << distribZMP_.x() << "," << distribZMP_.y() << ") "
-                << "since " << t_ << "[s]" << std::endl;
+      mc_rtc::log::warning("zmp over!! desired({},{}), actual({},{}) since {}[s]",
+                           modifiedZMP_.x(), modifiedZMP_.y(), distribZMP_.x(), distribZMP_.y(), t_);
     }
   }
   
@@ -995,17 +1025,38 @@ void DCMStabilizerTask::distributeWrench()
   else{
     uncompTorque_.setZero();
   }
+    
+  Eigen::Vector3d rfoot_torque_local = Eigen::Vector3d::Zero();
+  Eigen::Vector3d lfoot_torque_local = Eigen::Vector3d::Zero();
   
-  const Eigen::Vector3d & rfoot_pos = X_0_rc.translation();
-  const Eigen::Vector3d & lfoot_pos = X_0_lc.translation();
-  const Eigen::Vector3d rfoot_force = distribWrench_.force() * leftFootRatio_;
-  const Eigen::Vector3d lfoot_force = distribWrench_.force() * (1.0 - leftFootRatio_);
-  Eigen::Vector3d tau(Rfoot *
-                      ((distribZMP_ - rfoot_pos).cross(rfoot_force)
-                       + (distribZMP_ - lfoot_pos).cross(lfoot_force)));
-  Eigen::Vector3d rfoot_torque_local;
-  Eigen::Vector3d lfoot_torque_local;
+  Eigen::Vector3d rfoot_force = Eigen::Vector3d::Zero();
+  Eigen::Vector3d lfoot_force = Eigen::Vector3d::Zero();
+  
+  Eigen::Vector3d rfoot_torque = Eigen::Vector3d::Zero();
+  Eigen::Vector3d lfoot_torque = Eigen::Vector3d::Zero();
+  
   if( inDoubleSupport() ){
+#if 1
+    const auto & leftContact = contacts_.at(ContactState::Left);
+    const auto & rightContact = contacts_.at(ContactState::Right);
+    const sva::PTransformd & X_0_lc = leftContact.surfacePose();
+    const sva::PTransformd & X_0_rc = rightContact.surfacePose();
+#else  
+    const sva::PTransformd & X_0_rc = footTasks.at(ContactState::Right)->targetPose();
+    const sva::PTransformd & X_0_lc = footTasks.at(ContactState::Left)->targetPose();
+#endif
+    
+    const Eigen::Vector3d & rfoot_pos = X_0_rc.translation();
+    const Eigen::Vector3d & lfoot_pos = X_0_lc.translation();
+    rfoot_torque.z() = 0.0;
+    lfoot_torque.z() = 0.0;
+    
+    rfoot_force = distribWrench_.force() * leftFootRatio_;
+    lfoot_force = distribWrench_.force() * (1.0 - leftFootRatio_);
+    Eigen::Vector3d tau(Rlocal *
+                        ((distribZMP_ - rfoot_pos).cross(rfoot_force)
+                         + (distribZMP_ - lfoot_pos).cross(lfoot_force)));
+    
     if( leftFootRatio_ == 0.0 ){
       if( tau.x() < 0.0 ){
         rfoot_torque_local.x() = 0.0;
@@ -1030,107 +1081,133 @@ void DCMStabilizerTask::distributeWrench()
       rfoot_torque_local.x() = 0.0;
       lfoot_torque_local.x() = 0.0;
     }
+    
+    rfoot_torque_local.y() = leftFootRatio_ * tau.y();
+    lfoot_torque_local.y() = (1.0 - leftFootRatio_) * tau.y();
+    
+    rfoot_torque_local.z() = 0.0;
+    lfoot_torque_local.z() = 0.0;
+    
+    rfoot_torque = Rlocal.transpose() * rfoot_torque_local;
+    lfoot_torque = Rlocal.transpose() * lfoot_torque_local;
+    
+    rfoot_torque += rfoot_pos.cross(rfoot_force);
+    lfoot_torque += lfoot_pos.cross(lfoot_force);
+    rfoot_torque.z() = 0.0;
+    lfoot_torque.z() = 0.0;
+    
+    const sva::ForceVecd w_r_0(rfoot_torque, rfoot_force);
+    const sva::ForceVecd w_l_0(lfoot_torque, lfoot_force);
+    sva::ForceVecd w_l_lc = X_0_lc.dualMul(w_l_0);
+    sva::ForceVecd w_r_rc = X_0_rc.dualMul(w_r_0);
+    Eigen::Vector2d leftCoP = Eigen::Vector2d::Zero();
+    if( w_l_lc.force()(2) > 1e-3 )
+      leftCoP = (constants::vertical.cross(w_l_lc.couple()) / w_l_lc.force()(2)).head<2>();
+    Eigen::Vector2d rightCoP = Eigen::Vector2d::Zero();
+    if( w_r_rc.force()(2) > 1e-3 )
+      rightCoP = (constants::vertical.cross(w_r_rc.couple()) / w_r_rc.force()(2)).head<2>();
+    footTasks[ContactState::Left]->targetCoP(leftCoP);
+    footTasks[ContactState::Left]->targetForce(w_l_lc.force());
+    footTasks[ContactState::Right]->targetCoP(rightCoP);
+    footTasks[ContactState::Right]->targetForce(w_r_rc.force());
   }
   else if( inContact(ContactState::Left) ){
-    rfoot_torque_local.x() = 0.0;
+#if 1
+    const auto & leftContact = contacts_.at(ContactState::Left);
+    const sva::PTransformd & X_0_lc = leftContact.surfacePose();
+#else  
+    const sva::PTransformd & X_0_lc = footTasks.at(ContactState::Left)->targetPose();
+#endif
+    
+    lfoot_force = distribWrench_.force();
+    Eigen::Vector3d tau(Rlocal * distribZMP_.cross(lfoot_force));
     lfoot_torque_local.x() = tau.x();
+    lfoot_torque_local.y() = tau.y();
+    lfoot_torque = Rlocal.transpose() * lfoot_torque_local;
+    lfoot_torque.z() = 0.0;
+    
+    const sva::ForceVecd w_l_0(lfoot_torque, lfoot_force);
+    sva::ForceVecd w_l_lc = X_0_lc.dualMul(w_l_0);
+    Eigen::Vector2d leftCoP = Eigen::Vector2d::Zero();
+    if( w_l_lc.force()(2) > 1e-3 )
+      leftCoP = (constants::vertical.cross(w_l_lc.couple()) / w_l_lc.force()(2)).head<2>();
+    footTasks[ContactState::Left]->targetCoP(leftCoP);
+    footTasks[ContactState::Left]->targetForce(w_l_lc.force());
   }
   else if( inContact(ContactState::Right) ){
+#if 1
+    const auto & rightContact = contacts_.at(ContactState::Right);
+    const sva::PTransformd & X_0_rc = rightContact.surfacePose();
+#else  
+    const sva::PTransformd & X_0_rc = footTasks.at(ContactState::Right)->targetPose();
+#endif
+    
+    rfoot_force = distribWrench_.force();
+    Eigen::Vector3d tau(Rlocal * distribZMP_.cross(rfoot_force));
     rfoot_torque_local.x() = tau.x();
-    lfoot_torque_local.x() = 0.0;
+    rfoot_torque_local.y() = tau.y();
+    rfoot_torque = Rlocal.transpose() * rfoot_torque_local;
+    rfoot_torque.z() = 0.0;
+    
+    const sva::ForceVecd w_r_0(rfoot_torque, rfoot_force);
+    sva::ForceVecd w_r_rc = X_0_rc.dualMul(w_r_0);
+    Eigen::Vector2d rightCoP = Eigen::Vector2d::Zero();
+    if( w_r_rc.force()(2) > 1e-3 )
+      rightCoP = (constants::vertical.cross(w_r_rc.couple()) / w_r_rc.force()(2)).head<2>();
+    footTasks[ContactState::Right]->targetCoP(rightCoP);
+    footTasks[ContactState::Right]->targetForce(w_r_rc.force());
   }
-  
-  rfoot_torque_local.y() = leftFootRatio_ * tau.y();
-  lfoot_torque_local.y() = (1.0 - leftFootRatio_) * tau.y();
-  rfoot_torque_local.z() = 0.0;
-  lfoot_torque_local.z() = 0.0;
-  
-  Eigen::Vector3d rfoot_torque = Rfoot.transpose() * rfoot_torque_local;
-  Eigen::Vector3d lfoot_torque = Rfoot.transpose() * lfoot_torque_local;
-  
-  std::cout << "rfoot_force = " << rfoot_force.transpose() << std::endl;
-  std::cout << "lfoot_force = " << lfoot_force.transpose() << std::endl;
-  std::cout << "rfoot_torque = " << rfoot_torque.transpose() << std::endl;
-  std::cout << "lfoot_torque = " << lfoot_torque.transpose() << std::endl;
-  
-  rfoot_torque += rfoot_pos.cross(rfoot_force);
-  lfoot_torque += lfoot_pos.cross(lfoot_force);
-  
-  const sva::ForceVecd w_r_0(rfoot_torque, rfoot_force);
-  const sva::ForceVecd w_l_0(lfoot_torque, lfoot_force);
-  
-  footTasks_.at(ContactState::Right)->targetWrenchW(w_r_0);
-  footTasks_.at(ContactState::Left)->targetWrenchW(w_l_0);
-  
-#if 0
-  std::cout << "w_r_rc.force = " << w_r_rc.force().transpose() << std::endl;
-  std::cout << "w_l_lc.force = " << w_l_lc.force().transpose() << std::endl;
-  std::cout << "w_r_rc.moment = " << w_r_rc.moment().transpose() << std::endl;
-  std::cout << "w_l_lc.moment = " << w_l_lc.moment().transpose() << std::endl;
-#endif
-#if 0
-  std::cout << "X_0_rc trs = " << X_0_rc.translation().transpose() << std::endl;
-  std::cout << "X_0_rc rot = " << X_0_rc.rotation() << std::endl;
-  std::cout << "X_0_lc trs = " << X_0_lc.translation().transpose() << std::endl;
-  std::cout << "X_0_lc rot = " << X_0_lc.rotation() << std::endl;
-#endif
-#if 0
-  std::cout << "rfoot_force = " << rfoot_force.transpose() << std::endl;
-  std::cout << "lfoot_force = " << lfoot_force.transpose() << std::endl;
-  std::cout << "rfoot_torque = " << rfoot_torque.transpose() << std::endl;
-  std::cout << "lfoot_torque = " << lfoot_torque.transpose() << std::endl;
-#endif
 }
 
-void DCMStabilizerTask::updateFootImpedanceControl()
+void DCMStabilizerTask::updateCoMTaskZMPCC()
 {
-  if( inTheAir_)
+  c_.zmpcc = zmpcc_.config();
+  if(inTheAir_ || (zmpccOnlyDS_ && !inDoubleSupport()))
   {
-    std::cout << "Robot is in the air" << std::endl;
-    
-    for( auto & footT : footTasks_ )
-    {
-      footT.second->gains().wrench().vec(0., 0.);
-      footT.second->gains().wrench().vec(c_.footWrench[ImpedanceType::Air]);
-      footT.second->gains().M().vec(c_.footMass[ImpedanceType::Air]);
-      footT.second->gains().D().vec(c_.footStiffness[ImpedanceType::Air]);
-      footT.second->gains().K().vec(c_.footDamping[ImpedanceType::Air]);
-    }
+    zmpcc_.enabled(false); // Leak to zero
   }
-  else{
-    for(const auto contact : contacts_)
-    {
-      ImpedanceType WalkingPhase = std::get<0>(walking_phase_[contact.first]);
-      double WalkingPhaseDuration = std::get<1>(walking_phase_[contact.first]);
-      double WalkingCurrentTime = std::get<2>(walking_phase_[contact.first]);
-      auto & footT = footTasks_[contact.first];
-      footT->weight(c_.footWeight);
-      footT->gains().wrench().vec(c_.footWrench[WalkingPhase]);
-      footT->gains().M().vec(c_.footMass[WalkingPhase]);
-      footT->gains().D().vec(c_.footStiffness[WalkingPhase]);
-      footT->gains().K().vec(c_.footDamping[WalkingPhase]);
-
-#if 0
-      if( contact.first == ContactState::Right )
-        std::cout << "Right leg" << std::endl;
-      else
-        std::cout << "Left leg" << std::endl;
-
-      std::cout << "wrench = "
-                << c_.footWrench[WalkingPhase].linear().transpose() << ","
-                << c_.footWrench[WalkingPhase].angular().transpose() << std::endl;
-      std::cout << "M = "
-                << c_.footMass[WalkingPhase].linear().transpose() << ","
-                << c_.footMass[WalkingPhase].angular().transpose() << std::endl;;
-      std::cout << "D = "
-                << c_.footDamping[WalkingPhase].linear().transpose() << ","
-                << c_.footDamping[WalkingPhase].angular().transpose() << std::endl;;
-      std::cout << "K = "
-                << c_.footStiffness[WalkingPhase].linear().transpose() << ","
-                << c_.footStiffness[WalkingPhase].angular().transpose() << std::endl;;
-#endif
-    }
+  else
+  {
+    zmpcc_.configure(c_.zmpcc);
+    zmpcc_.enabled(enabled_);
+    zmpcc_.update(distribZMP_, measuredZMP_, zmpFrame_, dt_);
   }
+  zmpcc_.apply(comTarget_, comdTarget_, comddTarget_);
+}
+
+void DCMStabilizerTask::updateFootForceDifferenceControl()
+{
+  auto leftFootTask = footTasks[ContactState::Left];
+  auto rightFootTask = footTasks[ContactState::Right];
+  if(!inDoubleSupport() || inTheAir_)
+  {
+    dfzForceError_ = 0.;
+    dfzHeightError_ = 0.;
+    vdcHeightError_ = 0.;
+    leftFootTask->refVelB({{0., 0., 0.}, {0., 0., 0.}});
+    rightFootTask->refVelB({{0., 0., 0.}, {0., 0., 0.}});
+    return;
+  }
+
+  double LFz_d = leftFootTask->targetWrench().force().z();
+  double RFz_d = rightFootTask->targetWrench().force().z();
+  double LFz = leftFootTask->measuredWrench().force().z();
+  double RFz = rightFootTask->measuredWrench().force().z();
+  dfzForceError_ = (LFz_d - RFz_d) - (LFz - RFz);
+
+  double LTz_d = leftFootTask->targetPose().translation().z();
+  double RTz_d = rightFootTask->targetPose().translation().z();
+  double LTz = leftFootTask->surfacePose().translation().z();
+  double RTz = rightFootTask->surfacePose().translation().z();
+  dfzHeightError_ = (LTz_d - RTz_d) - (LTz - RTz);
+  vdcHeightError_ = (LTz_d + RTz_d) - (LTz + RTz);
+
+  double dz_ctrl = c_.dfzAdmittance * dfzForceError_ - c_.dfzDamping * dfzHeightError_;
+  double dz_vdc = c_.vdcFrequency * vdcHeightError_;
+  sva::MotionVecd velF = {{0., 0., 0.}, {0., 0., dz_ctrl}};
+  sva::MotionVecd velT = {{0., 0., 0.}, {0., 0., dz_vdc}};
+  leftFootTask->refVelB(0.5 * (velT - velF));
+  rightFootTask->refVelB(0.5 * (velT + velF));
 }
 
 template Eigen::Vector3d DCMStabilizerTask::computeCoMOffset<&DCMStabilizerTask::ExternalWrench::target>(
@@ -1153,9 +1230,9 @@ namespace
 static auto registered = mc_tasks::MetaTaskLoader::register_load_function(
     "dcm_stabilizer",
     [](mc_solver::QPSolver & solver, const mc_rtc::Configuration & config) {
-      unsigned robotIndex = robotIndexFromConfig(config, solver.robots(), "dcm_stabilizer");
+      unsigned robotIndex = robotIndexFromConfig(config, solver.robots(), "stabilizer");
       const auto & robot = solver.robots().robot(robotIndex);
-      
+
       // Load user-specified configuration
       mc_rbdyn::lipm_stabilizer::DCMStabilizerConfiguration stabiConf(robot.module().defaultLIPMStabilizerConfiguration());
       stabiConf.load(config);

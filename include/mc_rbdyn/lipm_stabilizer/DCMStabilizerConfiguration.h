@@ -32,7 +32,7 @@ struct SafetyThresholdsForDCMStabilizer
   double MAX_DCM_D_GAIN = 2.; /**< Maximum DCM derivative gain (no unit) */
   double MAX_DCM_I_GAIN = 100.; /**< Maximum DCM average integral gain in [Hz] */
   double MAX_DCM_P_GAIN = 20.; /**< Maximum DCM proportional gain in [Hz] */
-  double MAX_DCM_POLES = 30.; /**< Maximum DCM poles in [Hz] */
+  double MAX_DCM_POLES = 50.; /**< Maximum DCM poles in [Hz] */
   double MAX_DCM_FLEXIBILITY = 100.; /**< Maximum DCM flexibility in [Hz] */
   double MAX_COMD_GAIN = 10.; /**< Maximum CoMd gain in [Hz] */
   double MAX_ZMPD_GAIN = 10.; /**< Maximum ZMPd gain in [Hz] */

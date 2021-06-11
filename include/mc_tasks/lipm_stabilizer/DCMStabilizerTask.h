@@ -8,7 +8,6 @@
 #pragma once
 
 #include <mc_filter/ExponentialMovingAverage.h>
-#include <mc_filter/LeakyIntegrator.h>
 #include <mc_filter/LowPass.h>
 #include <mc_filter/StationaryOffset.h>
 #include <mc_tasks/CoMTask.h>
@@ -399,18 +398,16 @@ struct MC_TASKS_DLLAPI DCMStabilizerTask : public MetaTask
     c_.dcmDerivGain = clamp(d, 0., c_.safetyThresholds.MAX_DCM_D_GAIN);
   }
 
-  inline void dcmIntegratorTimeConstant(double dcmIntegratorTimeConstant) noexcept
+  inline void comVelLowPassFilter(double ratio) noexcept
   {
-    c_.dcmIntegratorTimeConstant = dcmIntegratorTimeConstant;
-    dcmIntegrator_.timeConstant(dcmIntegratorTimeConstant);
+    c_.comVelLowPassFilter = ratio;
   }
-
-  inline void dcmDerivatorTimeConstant(double dcmDerivatorTimeConstant) noexcept
+  
+  inline void comAccLowPassFilter(double ratio) noexcept
   {
-    c_.dcmDerivatorTimeConstant = dcmDerivatorTimeConstant;
-    dcmDerivator_.timeConstant(dcmDerivatorTimeConstant);
+    c_.comAccLowPassFilter = ratio;
   }
-
+    
   inline void extWrenchSumLowPassCutoffPeriod(double cutoffPeriod) noexcept
   {
     c_.extWrench.extWrenchSumLowPassCutoffPeriod = cutoffPeriod;
@@ -832,6 +829,8 @@ protected:
   DCMStabilizerConfiguration defaultConfig_;
   /**< Last valid stabilizer configuration. */
   DCMStabilizerConfiguration lastConfig_;
+  /**< Stabilizer configuration to disable. */
+  DCMStabilizerConfiguration disableConfig_;
   /**< Online stabilizer configuration, can be set from the GUI. Defaults to defaultConfig_ */
   DCMStabilizerConfiguration c_;
   /**< Whether the stabilizer needs to be reconfigured at the next
@@ -841,10 +840,10 @@ protected:
 
   Eigen::Vector3d dcmError_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d dcmVelError_ = Eigen::Vector3d::Zero();
-  Eigen::Vector3d dcmErrorSum_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d measuredCoM_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d measuredCoMd_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d measuredCoMdd_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d measuredCoMd_pre_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d measuredZMP_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d measuredDCM_ = Eigen::Vector3d::Zero(); /// Measured DCM (only used for logging)
   Eigen::Vector3d measuredDCMUnbiased_ = Eigen::Vector3d::Zero(); /// DCM unbiased (only used for logging)
@@ -884,9 +883,7 @@ protected:
       comOffsetLowPassCoM_; /**< Low-pass filter of CoM offset to extract CoM modification */
   mc_filter::StationaryOffset<Eigen::Vector3d> comOffsetDerivator_; /**< Derivator of CoM offset */
   /** @} */
-
-  mc_filter::ExponentialMovingAverage<Eigen::Vector3d> dcmIntegrator_;
-  mc_filter::StationaryOffset<Eigen::Vector3d> dcmDerivator_;
+  
   bool inTheAir_ = false; /**< Is the robot in the air? */
   double dfzForceError_ = 0.; /**< Force error in foot force difference control */
   double dfzHeightError_ = 0.; /**< Height error in foot force difference control */

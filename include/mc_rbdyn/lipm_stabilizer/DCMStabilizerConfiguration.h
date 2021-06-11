@@ -27,7 +27,7 @@ namespace lipm_stabilizer
  */
 struct SafetyThresholdsForDCMStabilizer
 {
-  double MAX_AVERAGE_DCM_ERROR = 0.05; /**< Maximum average (integral) DCM error in [m] */
+  double MAX_DCM_ERROR = 0.05; /**< Maximum integral DCM error in [m] */
   double MAX_COP_ADMITTANCE = 0.1; /**< Maximum CoP admittance for foot damping control */
   double MAX_DCM_D_GAIN = 2.; /**< Maximum DCM derivative gain (no unit) */
   double MAX_DCM_I_GAIN = 100.; /**< Maximum DCM average integral gain in [Hz] */
@@ -48,7 +48,7 @@ struct SafetyThresholdsForDCMStabilizer
 
   void load(const mc_rtc::Configuration & config)
   {
-    config("MAX_AVERAGE_DCM_ERROR", MAX_AVERAGE_DCM_ERROR);
+    config("MAX_DCM_ERROR", MAX_DCM_ERROR);
     config("MAX_COP_ADMITTANCE", MAX_COP_ADMITTANCE);
     config("MAX_DCM_D_GAIN", MAX_DCM_D_GAIN);
     config("MAX_DCM_I_GAIN", MAX_DCM_I_GAIN);
@@ -69,7 +69,7 @@ struct SafetyThresholdsForDCMStabilizer
   mc_rtc::Configuration save() const
   {
     mc_rtc::Configuration config;
-    config.add("MAX_AVERAGE_DCM_ERROR", MAX_AVERAGE_DCM_ERROR);
+    config.add("MAX_DCM_ERROR", MAX_DCM_ERROR);
     config.add("MAX_COP_ADMITTANCE", MAX_COP_ADMITTANCE);
     config.add("MAX_DCM_D_GAIN", MAX_DCM_D_GAIN);
     config.add("MAX_DCM_I_GAIN", MAX_DCM_I_GAIN);
@@ -149,11 +149,9 @@ struct MC_RBDYN_DLLAPI DCMStabilizerConfiguration
   double dcmPropGain = 1.; /**< Proportional gain on DCM error */
   double dcmIntegralGain = 5.; /**< Integral gain on DCM error */
   double dcmDerivGain = 0.; /**< Derivative gain on DCM error */
-  double comdErrorGain = 1.; /**< Gain on CoMd error */
   double zmpdGain = 0.; /**< Gain on ZMPd */
-  double dcmIntegratorTimeConstant =
-      15.; /**< Time window for exponential moving average filter of the DCM integrator */
-  double dcmDerivatorTimeConstant = 1.; /**< Time window for the stationary offset filter of the DCM derivator */
+  double comVelLowPassFilter = 0.3; /**< Low pass filter of measured com velocity */
+  double comAccLowPassFilter = 0.1; /**< Low pass filter of measured com acceleration */
   bool hasDCMPoles = true; /**< if pole is set, this flag is true */
   Eigen::Vector3d dcmPoles = {12.0, 3.0, 1.0}; /**< pole assignment for dcm controller */
   double dcmFlexibility = 20.0; /**< flexiblity of dcm around support */
@@ -179,7 +177,9 @@ struct MC_RBDYN_DLLAPI DCMStabilizerConfiguration
 
   double vdcFrequency = 1.; /**< Frequency used in double-support vertical drift compensation */
   double vdcStiffness = 1000.; /**< Stiffness used in single-support vertical drift compensation */
-
+  
+  Eigen::Vector3d dcmErrorSum = Eigen::Vector3d::Zero();
+  
   DCMBiasEstimatorConfiguration dcmBias; /**< Parameters for the DCM bias estimation */
 
   ExternalWrenchConfiguration extWrench; /**< Parameters for the external wrenches */
@@ -206,9 +206,8 @@ struct MC_RBDYN_DLLAPI DCMStabilizerConfiguration
     dcmPropGain = lipmStabilizerConfig.dcmPropGain;
     dcmIntegralGain = lipmStabilizerConfig.dcmIntegralGain;
     dcmDerivGain = lipmStabilizerConfig.dcmDerivGain;
-    dcmDerivatorTimeConstant = lipmStabilizerConfig.dcmDerivatorTimeConstant;
   }
-
+  
   /**
    * @brief Checks that the chosen parameters are within the parameters defined
    * by the SafetyThresholds
@@ -230,7 +229,6 @@ struct MC_RBDYN_DLLAPI DCMStabilizerConfiguration
       clampInPlaceAndWarn(dcmIntegralGain, 0., s.MAX_DCM_I_GAIN, "DCM integral gain");
       clampInPlaceAndWarn(dcmPropGain, 0., s.MAX_DCM_P_GAIN, "DCM prop gain");
     }
-    clampInPlaceAndWarn(comdErrorGain, 0., s.MAX_COMD_GAIN, "CoMd gain");
     clampInPlaceAndWarn(zmpdGain, 0., s.MAX_ZMPD_GAIN, "ZMPd gain");
     clampInPlaceAndWarn(dfzAdmittance, 0., s.MAX_DFZ_ADMITTANCE, "DFz admittance");
     clampInPlaceAndWarn(dfzDamping, 0., s.MAX_DFZ_DAMPING, "DFz admittance");
@@ -281,11 +279,10 @@ struct MC_RBDYN_DLLAPI DCMStabilizerConfiguration
           dcmGains("integral", dcmIntegralGain);
           dcmGains("deriv", dcmDerivGain);
         }
-        dcmTracking("gains")("comdError", comdErrorGain);
         dcmTracking("gains")("zmpd", zmpdGain);
       }
-      dcmTracking("derivator_time_constant", dcmDerivatorTimeConstant);
-      dcmTracking("integrator_time_constant", dcmIntegratorTimeConstant);
+      dcmTracking("com_vel_filter_gain", comVelLowPassFilter);
+      dcmTracking("com_acc_filter_gain", comAccLowPassFilter);
     }
     if(config.has("dcm_bias"))
     {
@@ -399,12 +396,10 @@ struct MC_RBDYN_DLLAPI DCMStabilizerConfiguration
       conf("dcm_tracking")("gains").add("integral", dcmIntegralGain);
       conf("dcm_tracking")("gains").add("deriv", dcmDerivGain);
     }
-    conf("dcm_tracking").add("derivator_time_constant", dcmDerivatorTimeConstant);
-    conf("dcm_tracking")("gains").add("comdError", comdErrorGain);
     conf("dcm_tracking")("gains").add("zmpd", zmpdGain);
-    conf("dcm_tracking").add("derivator_time_constant", dcmDerivatorTimeConstant);
-    conf("dcm_tracking").add("integrator_time_constant", dcmIntegratorTimeConstant);
-
+    conf("dcm_tracking").add("com_vel_filter_gain", comVelLowPassFilter);
+    conf("dcm_tracking").add("com_acc_filter_gain", comAccLowPassFilter);
+    
     conf.add("dcm_bias", dcmBias);
     conf.add("external_wrench", extWrench);
 

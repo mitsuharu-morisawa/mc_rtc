@@ -35,7 +35,6 @@ DCMStabilizerTask::DCMStabilizerTask(const mc_rbdyn::Robots & robots,
 : robots_(robots), realRobots_(realRobots), robotIndex_(robotIndex), dcmEstimator_(dt),
   extWrenchSumLowPass_(dt, /* cutoffPeriod = */ 0.05), comOffsetLowPass_(dt, /* cutoffPeriod = */ 0.05),
   comOffsetLowPassCoM_(dt, /* cutoffPeriod = */ 1.0), comOffsetDerivator_(dt, /* timeConstant = */ 1.),
-  dcmIntegrator_(dt, /* timeConstant = */ 15.), dcmDerivator_(dt, /* timeConstant = */ 1.), dt_(dt),
   mass_(robots.robot(robotIndex).mass())
 {
   type_ = "dcm_stabilizer";
@@ -98,7 +97,8 @@ void DCMStabilizerTask::reset()
 
   pelvisTask->reset();
   torsoTask->reset();
-
+  
+  measuredCoMd_pre_ = Eigen::Vector3d::Zero();
   dcmError_ = Eigen::Vector3d::Zero();
   dcmVelError_ = Eigen::Vector3d::Zero();
   dfzForceError_ = 0.;
@@ -106,7 +106,8 @@ void DCMStabilizerTask::reset()
   desiredWrench_ = sva::ForceVecd::Zero();
   distribWrench_ = sva::ForceVecd::Zero();
   vdcHeightError_ = 0.;
-
+  c_.dcmErrorSum = Eigen::Vector3d::Zero();
+  
   zmpcc_.reset();
 
   dcmEstimatorNeedsReset_ = true;
@@ -123,10 +124,7 @@ void DCMStabilizerTask::reset()
   comOffsetLowPass_.reset(Eigen::Vector3d::Zero());
   comOffsetLowPassCoM_.reset(Eigen::Vector3d::Zero());
   comOffsetDerivator_.reset(Eigen::Vector3d::Zero());
-
-  dcmDerivator_.reset(Eigen::Vector3d::Zero());
-  dcmIntegrator_.reset(Eigen::Vector3d::Zero());
-
+  
   omega_ = std::sqrt(constants::gravity.z() / robot().com().z());
   commitConfig();
 }
@@ -246,7 +244,7 @@ void DCMStabilizerTask::update(mc_solver::QPSolver & solver)
   // Prevent configuration changes while the stabilizer is disabled
   if(!enabled_)
   {
-    c_ = lastConfig_;
+    c_ = disableConfig_;
     zmpcc_.configure(c_.zmpcc);
   }
   if(reconfigure_) configure_(solver);
@@ -276,9 +274,7 @@ void DCMStabilizerTask::enable()
   // Reset DCM integrator when enabling the stabilizer.
   // While idle, it will accumulate a lot of error, and would case the robot to
   // move suddently to compensate it otherwise
-  dcmIntegrator_.reset(Eigen::Vector3d::Zero());
-  dcmDerivator_.reset(Eigen::Vector3d::Zero());
-
+  
   extWrenchSumLowPass_.reset(sva::ForceVecd::Zero());
   comOffsetLowPass_.reset(Eigen::Vector3d::Zero());
   comOffsetLowPassCoM_.reset(Eigen::Vector3d::Zero());
@@ -294,14 +290,15 @@ void DCMStabilizerTask::disable()
   mc_rtc::log::info("[DCMStabilizerTask] disabled");
   // Save current configuration to be reused when re-enabling
   lastConfig_ = c_;
+  disableConfig_ = c_;
   // Set the stabilizer gains to zero
-  c_.copAdmittance.setZero();
-  c_.dcmDerivGain = 0.;
-  c_.dcmIntegralGain = 0.;
-  c_.dcmPropGain = 0.;
-  c_.dfzAdmittance = 0.;
-  c_.vdcFrequency = 0.;
-  c_.vdcStiffness = 0.;
+  disableConfig_.copAdmittance.setZero();
+  disableConfig_.dcmDerivGain = 0.;
+  disableConfig_.dcmIntegralGain = 0.;
+  disableConfig_.dcmPropGain = 0.;
+  disableConfig_.dfzAdmittance = 0.;
+  disableConfig_.vdcFrequency = 0.;
+  disableConfig_.vdcStiffness = 0.;
   zmpcc_.enabled(false);
   enabled_ = false;
 }
@@ -317,6 +314,7 @@ void DCMStabilizerTask::configure(const DCMStabilizerConfiguration & config)
 {
   checkConfiguration(config);
   lastConfig_ = config;
+  disableConfig_ = config;
   c_ = config;
   c_.clampGains();
   reconfigure_ = true;
@@ -329,10 +327,6 @@ void DCMStabilizerTask::commitConfig()
 
 void DCMStabilizerTask::configure_(mc_solver::QPSolver & solver)
 {
-  dcmDerivator_.timeConstant(c_.dcmDerivatorTimeConstant);
-  dcmIntegrator_.timeConstant(c_.dcmIntegratorTimeConstant);
-  dcmIntegrator_.saturation(c_.safetyThresholds.MAX_AVERAGE_DCM_ERROR);
-
   extWrenchSumLowPass_.cutoffPeriod(c_.extWrench.extWrenchSumLowPassCutoffPeriod);
   comOffsetLowPass_.cutoffPeriod(c_.extWrench.comOffsetLowPassCutoffPeriod);
   comOffsetLowPassCoM_.cutoffPeriod(c_.extWrench.comOffsetLowPassCoMCutoffPeriod);
@@ -758,12 +752,11 @@ void DCMStabilizerTask::run()
 void DCMStabilizerTask::updateState(const Eigen::Vector3d & com, const Eigen::Vector3d & comd)
 {
   measuredCoM_ = com;
-  measuredCoMd_ += (comd - measuredCoMd_) * 0.3;
+  measuredCoMd_ += (comd - measuredCoMd_) * c_.comVelLowPassFilter;
   
-  static Eigen::Vector3d comd_pre(comd);
-  Eigen::Vector3d comdd((comd - comd_pre)/dt_);
-  measuredCoMdd_ += (comdd - measuredCoMdd_) * 0.1;
-  comd_pre = comd;
+  Eigen::Vector3d comdd((comd - measuredCoMd_pre_)/dt_);
+  measuredCoMdd_ += (comdd - measuredCoMdd_) * c_.comAccLowPassFilter;
+  measuredCoMd_pre_ = comd;
   
   measuredDCM_ = measuredCoM_ + measuredCoMd_ / omega_;
 }
@@ -783,9 +776,7 @@ void DCMStabilizerTask::computeDesiredWrench()
   
   if(inTheAir_)
   {
-    dcmDerivator_.reset(Eigen::Vector3d::Zero());
-    dcmIntegrator_.append(Eigen::Vector3d::Zero());
-    dcmErrorSum_ .setZero();
+    c_.dcmErrorSum.setZero();
     dcmEstimatorNeedsReset_ = true;
   }
   else
@@ -835,23 +826,20 @@ void DCMStabilizerTask::computeDesiredWrench()
       measuredDCMUnbiased_ = measuredDCM_;
       dcmEstimatorNeedsReset_ = true;
     }
-
-    dcmDerivator_.update(omega_ * (dcmError_ - zmpError));
-    dcmIntegrator_.append(dcmError_);
   }
   
   Eigen::Vector3d balanceZMP
     = c_.dcmPropGain * dcmError_
     + c_.dcmDerivGain * dcmVelError_
-    + c_.dcmIntegralGain * dcmErrorSum_;
+    + c_.dcmIntegralGain * c_.dcmErrorSum;
   
   for(int axis = 0 ; axis <= 1 ; axis++ ){
     if( fabs(distribZMP_(axis) - modifiedZMP_(axis)) < 0.01 )
-      dcmErrorSum_(axis) += dcmError_(axis) * dt_;
+      c_.dcmErrorSum(axis) += dcmError_(axis) * dt_;
   }
-  dcmErrorSum_ = clamp(dcmErrorSum_,
-                       -fabs(c_.safetyThresholds.MAX_AVERAGE_DCM_ERROR/c_.dcmIntegralGain),
-                       +fabs(c_.safetyThresholds.MAX_AVERAGE_DCM_ERROR/c_.dcmIntegralGain));
+  c_.dcmErrorSum = clamp(c_.dcmErrorSum,
+                         -fabs(c_.safetyThresholds.MAX_DCM_ERROR/c_.dcmIntegralGain),
+                         +fabs(c_.safetyThresholds.MAX_DCM_ERROR/c_.dcmIntegralGain));
   
   modifiedZMP_ = zmpTarget_ + c_.zmpdGain * zmpdTarget_  + balanceZMP;
   

@@ -299,6 +299,7 @@ void StabilizerTask::disable()
   disableConfig_.dcmDerivGain = 0.;
   disableConfig_.dcmIntegralGain = 0.;
   disableConfig_.dcmPropGain = 0.;
+  disableConfig_.dcmFiniteTimeConvergenceGain = 0.;
   disableConfig_.comdErrorGain = 0.;
   disableConfig_.zmpdGain = 0.;
   disableConfig_.dfzAdmittance = 0.;
@@ -857,8 +858,12 @@ sva::ForceVecd StabilizerTask::computeDesiredWrench()
   dcmAverageError_ = dcmIntegrator_.eval();
   dcmVelError_ = dcmDerivator_.eval();
 
+  dcmErrorSqrt_ = dcmError_.array().sign() * dcmError_.array().abs().sqrt();
+
   Eigen::Vector3d desiredCoMAccel = comddTarget_;
-  desiredCoMAccel += omega_ * (c_.dcmPropGain * dcmError_ + c_.comdErrorGain * comdError);
+  desiredCoMAccel +=
+      omega_
+      * (c_.dcmPropGain * dcmError_ + c_.dcmFiniteTimeConvergenceGain * dcmErrorSqrt_ + c_.comdErrorGain * comdError);
   desiredCoMAccel += omega_ * c_.dcmIntegralGain * dcmAverageError_;
   desiredCoMAccel += omega_ * c_.dcmDerivGain * dcmVelError_;
   desiredCoMAccel -= omega_ * omega_ * c_.zmpdGain * zmpdTarget_;

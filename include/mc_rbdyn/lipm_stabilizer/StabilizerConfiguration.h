@@ -69,6 +69,7 @@ struct SafetyThresholds
   double MAX_DCM_D_GAIN = 2.; /**< Maximum DCM derivative gain (no unit) */
   double MAX_DCM_I_GAIN = 100.; /**< Maximum DCM average integral gain in [Hz] */
   double MAX_DCM_P_GAIN = 20.; /**< Maximum DCM proportional gain in [Hz] */
+  double MAX_DCM_FIN_TIME_CONV_GAIN = 20.; /**< Maximum finite-time convergence gain in [Hz*m^(1/2)] */
   double MAX_COMD_GAIN = 10.; /**< Maximum CoMd gain in [Hz] */
   double MAX_ZMPD_GAIN = 10.; /**< Maximum ZMPd gain in [Hz] */
   double MAX_DFZ_ADMITTANCE = 5e-4; /**< Maximum admittance in [s] / [kg] for foot force difference control */
@@ -370,6 +371,7 @@ struct MC_RBDYN_DLLAPI StabilizerConfiguration
   double dfzDamping = 0.; /**< Damping term in foot force difference control */
 
   double dcmPropGain = 1.; /**< Proportional gain on DCM error */
+  double dcmFiniteTimeConvergenceGain = 0.; /**< Gain for the finite-time convergence of DCM error */
   double dcmIntegralGain = 5.; /**< Integral gain on DCM error */
   double dcmDerivGain = 0.; /**< Derivative gain on DCM error */
   double comdErrorGain = 1.; /**< Gain on CoMd error */
@@ -425,6 +427,7 @@ struct MC_RBDYN_DLLAPI StabilizerConfiguration
     clampInPlaceAndWarn(dcmDerivGain, 0., s.MAX_DCM_D_GAIN, "DCM deriv gain");
     clampInPlaceAndWarn(dcmIntegralGain, 0., s.MAX_DCM_I_GAIN, "DCM integral gain");
     clampInPlaceAndWarn(dcmPropGain, 0., s.MAX_DCM_P_GAIN, "DCM prop gain");
+    clampInPlaceAndWarn(dcmFiniteTimeConvergenceGain, 0., s.MAX_DCM_FIN_TIME_CONV_GAIN, "DCM fin-time x-gain");
     clampInPlaceAndWarn(comdErrorGain, 0., s.MAX_COMD_GAIN, "CoMd gain");
     clampInPlaceAndWarn(zmpdGain, 0., s.MAX_ZMPD_GAIN, "ZMPd gain");
     clampInPlaceAndWarn(dfzAdmittance, 0., s.MAX_DFZ_ADMITTANCE, "DFz admittance");
@@ -465,6 +468,7 @@ struct MC_RBDYN_DLLAPI StabilizerConfiguration
       if(dcmTracking.has("gains"))
       {
         dcmTracking("gains")("prop", dcmPropGain);
+        dcmTracking("gains")("fin_time_conv", dcmFiniteTimeConvergenceGain);
         dcmTracking("gains")("integral", dcmIntegralGain);
         dcmTracking("gains")("deriv", dcmDerivGain);
         dcmTracking("gains")("comdError", comdErrorGain);
@@ -580,6 +584,7 @@ struct MC_RBDYN_DLLAPI StabilizerConfiguration
     conf.add("dcm_tracking");
     conf("dcm_tracking").add("gains");
     conf("dcm_tracking")("gains").add("prop", dcmPropGain);
+    conf("dcm_tracking")("gains").add("fin_time_conv", dcmFiniteTimeConvergenceGain);
     conf("dcm_tracking")("gains").add("integral", dcmIntegralGain);
     conf("dcm_tracking")("gains").add("deriv", dcmDerivGain);
     conf("dcm_tracking")("gains").add("comdError", comdErrorGain);

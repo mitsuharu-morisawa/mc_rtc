@@ -58,11 +58,11 @@ void StabilizerTask::addToGUI(mc_rtc::gui::StateBuilder & gui)
             dfzDamping(a(1));
           }),
       ArrayInput(
-          "DCM gains", {"Prop.", "Integral", "Deriv."},
-          [this]() -> Eigen::Vector3d {
-            return {c_.dcmPropGain, c_.dcmIntegralGain, c_.dcmDerivGain};
+          "DCM gains", {"Prop.", "Finite-Time", "Integral", "Deriv."},
+          [this]() -> Eigen::Vector4d {
+            return {c_.dcmPropGain, c_.dcmFiniteTimeConvergenceGain, c_.dcmIntegralGain, c_.dcmDerivGain};
           },
-          [this](const Eigen::Vector3d & gains) { dcmGains(gains(0), gains(1), gains(2)); }),
+          [this](const Eigen::Vector4d & gains) { dcmGains(gains(0), gains(1), gains(2), gains(3)); }),
       NumberInput(
           "CoMd Error gain", [this]() { return c_.comdErrorGain; }, [this](double a) { c_.comdErrorGain = a; }),
       NumberInput(
@@ -76,6 +76,7 @@ void StabilizerTask::addToGUI(mc_rtc::gui::StateBuilder & gui)
             dcmIntegratorTimeConstant(T(0));
             dcmDerivatorTimeConstant(T(1));
           }));
+
   gui.addElement({"Tasks", name_, "Advanced"}, Button("Disable", [this]() { disable(); }));
   addConfigButtons({"Tasks", name_, "Advanced"});
   gui.addElement({"Tasks", name_, "Advanced"},
@@ -391,6 +392,8 @@ void StabilizerTask::addToLogger(mc_rtc::Logger & logger)
   logger.addLogEntry(name_ + "_dcmTracking_derivGain", this, [this]() { return c_.dcmDerivGain; });
   logger.addLogEntry(name_ + "_dcmTracking_integralGain", this, [this]() { return c_.dcmIntegralGain; });
   logger.addLogEntry(name_ + "_dcmTracking_propGain", this, [this]() { return c_.dcmPropGain; });
+  logger.addLogEntry(name_ + "_dcmTracking_finiteTimeConvGain", this,
+                     [this]() { return c_.dcmFiniteTimeConvergenceGain; });
   logger.addLogEntry(name_ + "_dcmTracking_comdErrorGain", this, [this]() { return c_.comdErrorGain; });
   logger.addLogEntry(name_ + "_dcmTracking_zmpdGain", this, [this]() { return c_.zmpdGain; });
   logger.addLogEntry(name_ + "_dcmBias_dcmMeasureErrorStd", this, [this]() { return c_.dcmBias.dcmMeasureErrorStd; });

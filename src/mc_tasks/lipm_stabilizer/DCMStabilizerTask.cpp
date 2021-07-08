@@ -926,8 +926,14 @@ bool DCMStabilizerTask::calcForceDistributionRatio(Eigen::Matrix3d& Rlocal)
   if( inDoubleSupport() ){
     const auto & leftContact = contacts_.at(ContactState::Left);
     const auto & rightContact = contacts_.at(ContactState::Right);
-    const Eigen::Vector3d & lfoot_pos = leftContact.anklePose().translation();
-    const Eigen::Vector3d & rfoot_pos = rightContact.anklePose().translation();
+    if( c_.disableFDZmpOffset ){
+      zmpOffsets_.at(ContactState::Left).setZero();
+      zmpOffsets_.at(ContactState::Right).setZero();
+    }
+    const Eigen::Vector3d lfoot_pos
+      = (sva::PTransformd(zmpOffsets_.at(ContactState::Left)) * leftContact.anklePose()).translation();
+    const Eigen::Vector3d rfoot_pos
+      = (sva::PTransformd(zmpOffsets_.at(ContactState::Right)) * rightContact.anklePose()).translation();
     
     const Eigen::Vector3d p0(lfoot_pos - rfoot_pos);
     const double length = sqrt(p0.x()*p0.x() + p0.y()*p0.y());

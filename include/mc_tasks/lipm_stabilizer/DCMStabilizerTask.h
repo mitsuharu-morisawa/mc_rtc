@@ -245,6 +245,15 @@ struct MC_TASKS_DLLAPI DCMStabilizerTask : public MetaTask
     return leftFootRatio_;
   }
 
+
+  /**
+   * @brief Set zmp offset that is used to calculte force distribution ratio
+   */
+  inline void setZmpOffset(const ContactState& s, const Eigen::Vector3d& offset)
+  {
+    zmpOffsets_.at(s) = offset;
+  }
+  
   /**
    * @brief computes the anchorFrame compatible with the state observers
    * (e.g KinematicInertial)
@@ -490,6 +499,7 @@ struct MC_TASKS_DLLAPI DCMStabilizerTask : public MetaTask
     }
   }
 
+#if 0
   /* Set the gain of the low-pass velocity filter of the cop tasks */
   inline void copVelFilterGain(double gain) noexcept
   {
@@ -505,7 +515,8 @@ struct MC_TASKS_DLLAPI DCMStabilizerTask : public MetaTask
   {
     return c_.copVelFilterGain;
   }
-
+#endif
+  
   inline void vdcFrequency(double freq) noexcept
   {
     c_.vdcFrequency = clamp(freq, 0., 10.);
@@ -799,7 +810,11 @@ protected:
   std::unordered_map<ContactState, std::shared_ptr<mc_tasks::force::CoPTask>, EnumClassHash> footTasks;
   std::vector<std::shared_ptr<mc_tasks::force::CoPTask>> contactTasks; /** Foot tasks for the established contacts */
   std::vector<std::string> contactSensors; /** Force sensors corresponding to established contacts */
-
+  
+  /**< Zmp offset set from pattern generator */
+  std::unordered_map<ContactState, Eigen::Vector3d, EnumClassHash> zmpOffsets_
+    = {{ContactState::Left, Eigen::Vector3d::Zero()}, {ContactState::Right, Eigen::Vector3d::Zero()}};
+  
   std::vector<std::vector<Eigen::Vector3d>> supportPolygons_; /**< For GUI display */
   std::shared_ptr<computational_geometry::SupportPolygonManager<ContactState> > spm_;
   Eigen::Vector2d supportMin_ = Eigen::Vector2d::Zero();

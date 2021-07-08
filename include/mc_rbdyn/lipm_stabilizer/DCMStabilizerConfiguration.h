@@ -178,6 +178,7 @@ struct MC_RBDYN_DLLAPI DCMStabilizerConfiguration
   double vdcFrequency = 1.; /**< Frequency used in double-support vertical drift compensation */
   double vdcStiffness = 1000.; /**< Stiffness used in single-support vertical drift compensation */
   
+  bool disableFDZmpOffset = false; /**< disable to update zmp offset of foot position to force distribution */
   Eigen::Vector3d dcmErrorSum = Eigen::Vector3d::Zero();
   
   DCMBiasEstimatorConfiguration dcmBias; /**< Parameters for the DCM bias estimation */
@@ -283,6 +284,7 @@ struct MC_RBDYN_DLLAPI DCMStabilizerConfiguration
       }
       dcmTracking("com_vel_filter_gain", comVelLowPassFilter);
       dcmTracking("com_acc_filter_gain", comAccLowPassFilter);
+      dcmTracking("disable_fd_zmp_offset", disableFDZmpOffset);
     }
     if(config.has("dcm_bias"))
     {
@@ -399,6 +401,7 @@ struct MC_RBDYN_DLLAPI DCMStabilizerConfiguration
     conf("dcm_tracking")("gains").add("zmpd", zmpdGain);
     conf("dcm_tracking").add("com_vel_filter_gain", comVelLowPassFilter);
     conf("dcm_tracking").add("com_acc_filter_gain", comAccLowPassFilter);
+    conf("dcm_tracking").add("disable_fd_zmp_offset", disableFDZmpOffset);
     
     conf.add("dcm_bias", dcmBias);
     conf.add("external_wrench", extWrench);

@@ -71,7 +71,9 @@ void DCMStabilizerTask::addToGUI(mc_rtc::gui::StateBuilder & gui)
                  [this](const Eigen::Vector2d & T) {
                    c_.comVelLowPassFilter = T(0);
                    c_.comAccLowPassFilter = T(1);
-                 }));
+                 }),
+      Checkbox("Disable zmpOffset in fdist ?", [this]() { return c_.disableFDZmpOffset; },
+               [this]() { c_.disableFDZmpOffset = !c_.disableFDZmpOffset; }));
   gui.addElement({"Tasks", name_, "Advanced"}, Button("Disable", [this]() { disable(); }));
   addConfigButtons({"Tasks", name_, "Advanced"});
   gui.addElement({"Tasks", name_, "Advanced"},
@@ -80,8 +82,6 @@ void DCMStabilizerTask::addToGUI(mc_rtc::gui::StateBuilder & gui)
   zmpcc_.addToGUI(gui, {"Tasks", name_, "Advanced"});
   gui.addElement(
       {"Tasks", name_, "Advanced"},
-      NumberInput("Admittance Velocity Filter [0-1]", [this]() { return c_.copVelFilterGain; },
-                  [this](double gain) { copVelFilterGain(gain); }),
       ArrayInput("Max cop angular velocity [rad/s]",
                  [this]() -> const Eigen::Vector3d & { return footTasks.at(ContactState::Left)->maxAngularVel(); },
                  [this](const Eigen::Vector3d & v) {

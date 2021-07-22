@@ -184,6 +184,8 @@ struct MC_RBDYN_DLLAPI StabilizerConfiguration
 {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
+  bool verbose = true; /**< Enable verbose output messages */
+
   SafetyThresholds safetyThresholds;
   FDQPWeights fdqpWeights;
 
@@ -260,6 +262,8 @@ struct MC_RBDYN_DLLAPI StabilizerConfiguration
 
   void load(const mc_rtc::Configuration & config)
   {
+    config("verbose", verbose);
+
     if(config.has("safety_tresholds"))
     {
       safetyThresholds.load(config("safety_tresholds"));
@@ -270,10 +274,10 @@ struct MC_RBDYN_DLLAPI StabilizerConfiguration
       fdqpWeights.load(config("fdqp_weights"));
     }
 
+    config("friction", friction);
     config("leftFootSurface", leftFootSurface);
     config("rightFootSurface", rightFootSurface);
     config("torsoBodyName", torsoBodyName);
-    config("friction", friction);
 
     if(config.has("admittance"))
     {
@@ -380,12 +384,15 @@ struct MC_RBDYN_DLLAPI StabilizerConfiguration
   mc_rtc::Configuration save() const
   {
     mc_rtc::Configuration conf;
+    conf.add("verbose", verbose);
+
     conf.add("safety_tresholds", safetyThresholds);
     conf.add("fdqp_weights", fdqpWeights);
 
-    conf.add("torsoBodyName", torsoBodyName);
+    conf.add("friction", friction);
     conf.add("leftFootSurface", leftFootSurface);
     conf.add("rightFootSurface", rightFootSurface);
+    conf.add("torsoBodyName", torsoBodyName);
 
     conf.add("admittance");
     conf("admittance").add("cop", copAdmittance);

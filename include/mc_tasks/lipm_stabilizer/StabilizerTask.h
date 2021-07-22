@@ -95,6 +95,23 @@ struct MC_TASKS_DLLAPI StabilizerTask : public MetaTask
                  unsigned int robotIndex,
                  double dt);
 
+  inline void name(const std::string & name) override
+  {
+    name_ = name;
+
+    // Rename the tasks managed by the stabilizer
+    // Doing so helps making the logs more consistent, and having a fixed name
+    // allows for predifined custom plots in the log ui.
+    const auto n = name_ + "_Tasks";
+    comTask->name(n + "_com");
+    footTasks.at(ContactState::Left)->name(n + "_cop_left");
+    footTasks.at(ContactState::Right)->name(n + "_cop_right");
+    pelvisTask->name(n + "_pelvis");
+    torsoTask->name(n + "_torso");
+  }
+
+  using MetaTask::name;
+
   /**
    * @brief Resets the stabilizer tasks and parameters to their default configuration.
    *
@@ -327,6 +344,11 @@ struct MC_TASKS_DLLAPI StabilizerTask : public MetaTask
   inline const Eigen::Vector3d & measuredCoMd() noexcept
   {
     return measuredCoM_;
+  }
+
+  inline const Eigen::Vector3d & comOffsetTarget() noexcept
+  {
+    return comOffsetTarget_;
   }
 
   inline bool inContact(ContactState state) const noexcept

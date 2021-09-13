@@ -137,7 +137,12 @@ public:
   {
     return deltaCompPoseW_;
   }
-
+  
+  const sva::MotionVecd & deltaComplianceVel() const
+  {
+    return deltaCompVelW_;
+  }
+  
   /*! \brief Get the compliance pose of the surface in the world frame.
    *
    *  \note Compliance pose cannot be set by user because it is calculated from the impedance equation internally.
@@ -149,7 +154,7 @@ public:
     sva::PTransformd T_0_d(targetPoseW_.rotation());
     return T_0_d * deltaCompPoseW_ * T_0_d.inv() * targetPoseW_;
   }
-
+  
   /*! \brief Get the target wrench in the surface frame. */
   const sva::ForceVecd & targetWrench() const noexcept
   {

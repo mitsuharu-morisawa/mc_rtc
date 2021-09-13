@@ -15,16 +15,35 @@
 namespace mc_tasks
 {
 
+struct TrajectoryTaskGenericCommon : public MetaTask
+{
+  virtual void stiffness(double stiffness) = 0;
+  virtual void stiffness(const Eigen::VectorXd & stiffness) = 0;
+  virtual void setGains(double stiffness, double damping) = 0;
+  virtual void setGains(const Eigen::VectorXd & stiffness, const Eigen::VectorXd & damping) = 0;
+  virtual void weight(double w) = 0;
+  virtual void dimWeight(const Eigen::VectorXd & dimW) = 0;
+  
+  virtual double stiffness() const = 0;
+  virtual double damping() const = 0;
+  virtual const Eigen::VectorXd & dimStiffness() const = 0;
+  virtual const Eigen::VectorXd & dimDamping() const = 0;
+  virtual double weight() const = 0;
+  virtual Eigen::VectorXd dimWeight() const = 0;
+
+  virtual tasks::qp::Task* get() = 0;
+};
+
 /*! \brief Generic wrapper for a tasks::qp::TrajectoryTask
  *
  * This task is meant to be derived to build actual tasks
  *
  */
 template<typename T>
-struct TrajectoryTaskGeneric : public MetaTask
+struct TrajectoryTaskGeneric : public TrajectoryTaskGenericCommon
 {
   using TrajectoryBase = TrajectoryTaskGeneric<T>;
-
+  
   /*! \brief Constructor (auto damping)
    *
    * This is a simple constructor alternative. Damping is set to
@@ -40,7 +59,8 @@ struct TrajectoryTaskGeneric : public MetaTask
    * \param weight Weight of the task
    *
    */
-  TrajectoryTaskGeneric(const mc_rbdyn::Robots & robots, unsigned int robotIndex, double stiffness, double weight);
+  TrajectoryTaskGeneric(const mc_rbdyn::Robots & robots, unsigned int robotIndex,
+                        double stiffness, double weight);
 
   virtual ~TrajectoryTaskGeneric();
 
@@ -108,7 +128,7 @@ struct TrajectoryTaskGeneric : public MetaTask
    *
    */
   void damping(const Eigen::VectorXd & damping);
-
+  
   /*! \brief Set both stiffness and damping
    *
    * \param stiffness Task stiffness
@@ -128,7 +148,7 @@ struct TrajectoryTaskGeneric : public MetaTask
    *
    */
   void setGains(const Eigen::VectorXd & stiffness, const Eigen::VectorXd & damping);
-
+  
   /*! \brief Get the current task stiffness */
   double stiffness() const;
 
@@ -140,7 +160,7 @@ struct TrajectoryTaskGeneric : public MetaTask
 
   /*! \brief Get the current task dimensional damping */
   const Eigen::VectorXd & dimDamping() const;
-
+  
   /*! \brief Set the task weight
    *
    * \param w Task weight
@@ -232,14 +252,16 @@ struct TrajectoryTaskGeneric : public MetaTask
   const Eigen::VectorXd & normalAcc() const;
 
   const Eigen::MatrixXd & jac() const;
-
+  
   void load(mc_solver::QPSolver & solver, const mc_rtc::Configuration & config) override;
 
+  tasks::qp::Task* get() override;
+  
 protected:
   /*! This function should be called to finalize the task creation, it will
    * create the actual tasks objects */
-  template<typename... Args>
-  void finalize(Args &&... args);
+  template<typename ... Args>
+  void finalize(Args && ... args);
 
   void addToGUI(mc_rtc::gui::StateBuilder &) override;
 
@@ -249,12 +271,13 @@ protected:
       double dt,
       const mc_rtc::Configuration & config) const override;
 
-protected:
+ protected:
   const mc_rbdyn::Robots & robots;
   unsigned int rIndex;
   std::shared_ptr<T> errorT = nullptr;
   Eigen::VectorXd refVel_;
   Eigen::VectorXd refAccel_;
+
   bool inSolver_ = false;
   std::shared_ptr<tasks::qp::TrajectoryTask> trajectoryT_ = nullptr;
 

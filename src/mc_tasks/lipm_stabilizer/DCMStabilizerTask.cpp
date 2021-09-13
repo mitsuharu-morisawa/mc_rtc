@@ -54,7 +54,7 @@ DCMStabilizerTask::DCMStabilizerTask(const mc_rbdyn::Robots & robots,
   pelvisTask = std::make_shared<mc_tasks::OrientationTask>(pelvisBodyName, robots_, robotIndex_);
   torsoTask = std::make_shared<mc_tasks::OrientationTask>(torsoBodyName, robots_, robotIndex_);
   
-  // Rename the tasks managed by the stabilizerxo
+  // Rename the tasks managed by the stabilizer
   // Doing so helps making the logs more consistent, and having a fixed name
   // allows for predifined custom plots in the log ui.
   const auto n = name_ + "_Tasks";

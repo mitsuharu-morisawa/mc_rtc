@@ -16,9 +16,9 @@ namespace mc_tasks
 
 template<typename T>
 TrajectoryTaskGeneric<T>::TrajectoryTaskGeneric(const mc_rbdyn::Robots & robots,
-                                                unsigned int robotIndex,
-                                                double stiffness,
-                                                double w)
+                                             unsigned int robotIndex,
+                                             double stiffness,
+                                             double w)
 : robots(robots), rIndex(robotIndex), stiffness_(Eigen::VectorXd::Constant(1, stiffness)),
   damping_(Eigen::VectorXd::Constant(1, 2 * std::sqrt(stiffness))), weight_(w)
 {
@@ -75,7 +75,7 @@ void TrajectoryTaskGeneric<T>::reset()
   refVel(Eigen::VectorXd::Zero(v.size()));
   refAccel(Eigen::VectorXd::Zero(v.size()));
 }
-
+  
 template<typename T>
 void TrajectoryTaskGeneric<T>::update(mc_solver::QPSolver &)
 {
@@ -110,7 +110,7 @@ const Eigen::VectorXd & TrajectoryTaskGeneric<T>::refAccel() const
 template<typename T>
 void TrajectoryTaskGeneric<T>::stiffness(double s)
 {
-  setGains(s, 2 * std::sqrt(s));
+  setGains(s, 2*std::sqrt(s));
 }
 
 template<typename T>
@@ -131,7 +131,7 @@ void TrajectoryTaskGeneric<T>::damping(const Eigen::VectorXd & damping)
 {
   setGains(trajectoryT_->stiffness(), damping);
 }
-
+  
 template<typename T>
 void TrajectoryTaskGeneric<T>::setGains(double s, double d)
 {
@@ -237,7 +237,7 @@ void TrajectoryTaskGeneric<T>::selectActiveJoints(
     selectActiveJoints(activeJointsName, activeDofs, false);
   }
 }
-
+  
 template<typename T>
 void TrajectoryTaskGeneric<T>::selectUnactiveJoints(
     const std::vector<std::string> & unactiveJointsName,
@@ -295,7 +295,7 @@ void TrajectoryTaskGeneric<T>::resetJointsSelector()
   trajectoryT_ = std::make_shared<tasks::qp::TrajectoryTask>(robots.mbs(), rIndex, errorT.get(), 1, 2, weight_);
   trajectoryT_->setGains(stiffness_, damping_);
 }
-
+  
 template<typename T>
 void TrajectoryTaskGeneric<T>::resetJointsSelector(mc_solver::QPSolver & solver)
 {
@@ -350,7 +350,7 @@ const Eigen::MatrixXd & TrajectoryTaskGeneric<T>::jac() const
   }
   return errorT->jac();
 }
-
+  
 template<typename T>
 void TrajectoryTaskGeneric<T>::load(mc_solver::QPSolver & solver, const mc_rtc::Configuration & config)
 {
@@ -392,6 +392,12 @@ void TrajectoryTaskGeneric<T>::load(mc_solver::QPSolver & solver, const mc_rtc::
   {
     refAccel(config("refAccel"));
   }
+}
+
+template<typename T>
+tasks::qp::Task* TrajectoryTaskGeneric<T>::get()
+{
+  return trajectoryT_.get();
 }
 
 template<typename T>

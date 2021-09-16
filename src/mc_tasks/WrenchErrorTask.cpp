@@ -69,16 +69,20 @@ void WrenchErrorTask::update(mc_solver::QPSolver & solver)
   
   // 3. Compute the compliance pose and velocity by time integral
   // 3.1 Integrate velocity to pose
-  double deltaCompVel_ang_norm = deltaCompVelW_.angular().norm();
+  sva::PTransformd T_0_deltaC(deltaCompPoseW_.rotation());
+  // Represent the compliance velocity and acceleration in the deltaCompliance frame and scale by dt
+  sva::MotionVecd mvDeltaCompVelIntegralC = T_0_deltaC * (dt * (deltaCompVelW_ + 0.5 * dt * deltaCompAccelW_));
+  // Convert the angular velocity to the rotation matrix through AngleAxis representation
   Eigen::AngleAxisd aaDeltaCompVelIntegralC(Eigen::Quaterniond::Identity());
-  if(deltaCompVel_ang_norm > 1e-15)
+  double mvDeltaCompVelIntegralC_ang_norm = mvDeltaCompVelIntegralC.angular().norm();
+  if(mvDeltaCompVelIntegralC_ang_norm > 1e-15)
   {
     aaDeltaCompVelIntegralC =
-      Eigen::AngleAxisd(deltaCompVel_ang_norm*dt, deltaCompVelW_.angular().normalized());
+      Eigen::AngleAxisd(mvDeltaCompVelIntegralC_ang_norm, mvDeltaCompVelIntegralC.angular().normalized());
   }
   sva::PTransformd deltaCompVelIntegral(
       // Rotation matrix is transposed because sva::PTransformd uses the left-handed coordinates
-      aaDeltaCompVelIntegralC.toRotationMatrix().transpose(), deltaCompVelW_.linear()*dt);
+      aaDeltaCompVelIntegralC.toRotationMatrix().transpose(), mvDeltaCompVelIntegralC.linear());
   // Since deltaCompVelIntegral is multiplied by deltaCompPoseW_, it must be represented in the deltaCompliance frame
   deltaCompPoseW_ = deltaCompVelIntegral * deltaCompPoseW_;
   //deltaCompPoseW_ = deltaCompPoseW_ * deltaCompVelIntegral;

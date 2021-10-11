@@ -78,7 +78,7 @@ Where `baseline` should be the latest commit sha1 on [mc-rtc/vcpkg-registry](htt
 
 You can then either:
 
-- install mc_rtc via the `vcpkg` command: `vcpkg install mc_rtc`
+- install mc_rtc via the `vcpkg` command: `vcpkg install mc-rtc`
 - use the mc_rtc package in your manifest (`vcpkg.json` file), such as the following example:
 
 {% capture source %}

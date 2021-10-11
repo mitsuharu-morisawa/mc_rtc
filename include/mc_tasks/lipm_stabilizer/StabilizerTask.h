@@ -583,6 +583,8 @@ struct MC_TASKS_DLLAPI StabilizerTask : public MetaTask
   {
     auto & bc = c_.dcmBias;
     bc = biasConfig;
+    initDcmBias_ = bc.initDcmBias;
+    dcmEstimator_.setBias(bc.initDcmBias);
     dcmEstimator_.setBiasDriftPerSecond(bc.biasDriftPerSecondStd);
     dcmEstimator_.setDcmMeasureErrorStd(bc.dcmMeasureErrorStd);
     dcmEstimator_.setZmpMeasureErrorStd(bc.zmpMeasureErrorStd);
@@ -876,6 +878,7 @@ protected:
    * pendulum model.
    */
   stateObservation::LipmDcmEstimator dcmEstimator_;
+  Eigen::Vector2d initDcmBias_ = Eigen::Vector2d::Zero();
   /**< Whether the estimator needs to be reset (robot in the air, initialization) */
   bool dcmEstimatorNeedsReset_ = true;
 

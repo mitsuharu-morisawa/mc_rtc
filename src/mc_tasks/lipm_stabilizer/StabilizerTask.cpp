@@ -820,7 +820,8 @@ sva::ForceVecd StabilizerTask::computeDesiredWrench()
 
       if(dcmEstimatorNeedsReset_)
       {
-        dcmEstimator_.resetWithMeasurements(dcmError_.head<2>(), zmpError.head<2>(), waistOrientation, true);
+        dcmEstimator_.resetWithMeasurements(dcmError_.head<2>(), zmpError.head<2>(), waistOrientation, true,
+                                            initDcmBias_);
         dcmEstimatorNeedsReset_ = false;
       }
       else

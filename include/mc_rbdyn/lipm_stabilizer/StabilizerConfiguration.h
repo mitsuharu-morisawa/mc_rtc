@@ -125,6 +125,8 @@ struct SafetyThresholds
 struct DCMBiasEstimatorConfiguration
 {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+  /// Initial value of the DCM Bias
+  Eigen::Vector2d initDcmBias = {0.0, 0.0};
   /// the standard deviation of the dcm estimation error, NOT including the bias [m]
   double dcmMeasureErrorStd = 0.01;
   /// the standard deviaiton of the zmp estimation error [m]
@@ -140,6 +142,7 @@ struct DCMBiasEstimatorConfiguration
 
   void load(const mc_rtc::Configuration & config)
   {
+    config("initDcmBias", initDcmBias);
     config("dcmMeasureErrorStd", dcmMeasureErrorStd);
     config("zmpMeasureErrorStd", zmpMeasureErrorStd);
     config("biasDriftPerSecondStd", biasDriftPerSecondStd);
@@ -151,6 +154,7 @@ struct DCMBiasEstimatorConfiguration
   mc_rtc::Configuration save() const
   {
     mc_rtc::Configuration config;
+    config.add("initDcmBias", initDcmBias);
     config.add("dcmMeasureErrorStd", dcmMeasureErrorStd);
     config.add("zmpMeasureErrorStd", zmpMeasureErrorStd);
     config.add("biasDriftPerSecondStd", biasDriftPerSecondStd);

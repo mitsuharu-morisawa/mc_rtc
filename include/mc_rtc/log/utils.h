@@ -26,6 +26,7 @@ enum class LogType
   String,
   Vector2d,
   Vector3d,
+  Vector4d,
   Vector6d,
   VectorXd,
   Quaterniond,
@@ -37,10 +38,10 @@ enum class LogType
 
 inline const char ** LogTypeNames()
 {
-  static const char * names[] = {"None",        "Bool",      "Int8_t",     "Int16_t",      "Int32_t",  "Int64_t",
-                                 "Uint8_t",     "Uint16_t",  "Uint32_t",   "Uint64_t",     "Float",    "Double",
-                                 "String",      "Vector2d",  "Vector3d",   "Vector6d",     "VectorXd", "Quaterniond",
-                                 "PTransformd", "ForceVecd", "MotionVecd", "VectorDouble", nullptr};
+  static const char * names[] = {"None",        "Bool",        "Int8_t",    "Int16_t",    "Int32_t",      "Int64_t",
+                                 "Uint8_t",     "Uint16_t",    "Uint32_t",  "Uint64_t",   "Float",        "Double",
+                                 "String",      "Vector2d",    "Vector3d",  "Vector4d",   "Vector6d",     "VectorXd",
+                                 "Quaterniond", "PTransformd", "ForceVecd", "MotionVecd", "VectorDouble", nullptr};
   return names;
 }
 
@@ -78,6 +79,7 @@ IMPL_MAPPING(double, Double);
 IMPL_MAPPING(std::string, String);
 IMPL_MAPPING(Eigen::Vector2d, Vector2d);
 IMPL_MAPPING(Eigen::Vector3d, Vector3d);
+IMPL_MAPPING(Eigen::Vector4d, Vector4d);
 IMPL_MAPPING(Eigen::Vector6d, Vector6d);
 IMPL_MAPPING(Eigen::VectorXd, VectorXd);
 IMPL_MAPPING(Eigen::Quaterniond, Quaterniond);
@@ -108,6 +110,7 @@ struct GetLogType<Eigen::Ref<Type, Options, StrideType>>
     Type::ColsAtCompileTime != 1 ? mc_rtc::log::LogType::None :
     Type::RowsAtCompileTime == 2 ? mc_rtc::log::LogType::Vector2d :
     Type::RowsAtCompileTime == 3 ? mc_rtc::log::LogType::Vector3d :
+    Type::RowsAtCompileTime == 4 ? mc_rtc::log::LogType::Vector4d :
     Type::RowsAtCompileTime == 6 ? mc_rtc::log::LogType::Vector6d :
                                    mc_rtc::log::LogType::VectorXd;
   // clang-format on

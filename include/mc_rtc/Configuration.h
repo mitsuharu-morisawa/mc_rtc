@@ -847,6 +847,12 @@ public:
    */
   void add(const std::string & key, const Eigen::Vector3d & value);
 
+  /*! \brief Add a Eigen::Vector3d element to the Configuration
+   *
+   * \see add(const std::string&, bool)
+   */
+  void add(const std::string & key, const Eigen::Vector4d & value);
+
   /*! \brief Add a Eigen::Vector6d element to the Configuration
    *
    * \see add(const std::string&, bool)

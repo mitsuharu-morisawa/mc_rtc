@@ -18,7 +18,7 @@ namespace mc_filter
  * This filter can be seen as an integrator:
  *
  * \f[
- *    y(t) = \frac{1}{T} \int_{u=0}^t x(u) e^{(u - t) / T} {\rm d}{\tau}
+ *    y(t) = \frac{1}{T} \int_{u=0}^t x(u) e^{(u - t) / T} {\rm d}{u}
  * \f]
  *
  * with T > 0 a reset period acting as anti-windup. It can also (informally) be

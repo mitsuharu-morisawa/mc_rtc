@@ -375,7 +375,6 @@ struct MC_RBDYN_DLLAPI StabilizerConfiguration
   double dfzDamping = 0.; /**< Damping term in foot force difference control */
 
   double dcmPropGain = 1.; /**< Proportional gain on DCM error */
-  double dcmFiniteTimeConvergenceGain = 0.; /**< Gain for the finite-time convergence of DCM error */
   double dcmIntegralGain = 5.; /**< Integral gain on DCM error */
   double dcmDerivGain = 0.; /**< Derivative gain on DCM error */
   double comdErrorGain = 1.; /**< Gain on CoMd error */
@@ -383,6 +382,10 @@ struct MC_RBDYN_DLLAPI StabilizerConfiguration
   double dcmIntegratorTimeConstant =
       15.; /**< Time window for exponential moving average filter of the DCM integrator */
   double dcmDerivatorTimeConstant = 1.; /**< Time window for the stationary offset filter of the DCM derivator */
+
+  bool withFiniteTimeDCMControl = false; /**< Whether the finite time convergenmce DCM control is activated */
+  Eigen::Vector3d dcmFiniteTimeConvergenceParams =
+      Eigen::Vector3d::Zero(); /**< gains for the finite-time convergence of DCM error */
 
   std::vector<std::string> comActiveJoints; /**< Joints used by CoM IK task */
   Eigen::Vector3d comStiffness = {1000., 1000., 100.}; /**< Stiffness of CoM IK task */
@@ -431,7 +434,8 @@ struct MC_RBDYN_DLLAPI StabilizerConfiguration
     clampInPlaceAndWarn(dcmDerivGain, 0., s.MAX_DCM_D_GAIN, "DCM deriv gain");
     clampInPlaceAndWarn(dcmIntegralGain, 0., s.MAX_DCM_I_GAIN, "DCM integral gain");
     clampInPlaceAndWarn(dcmPropGain, 0., s.MAX_DCM_P_GAIN, "DCM prop gain");
-    clampInPlaceAndWarn(dcmFiniteTimeConvergenceGain, 0., s.MAX_DCM_FIN_TIME_CONV_GAIN, "DCM fin-time x-gain");
+    clampInPlaceAndWarn(dcmFiniteTimeConvergenceParams(0), 0., s.MAX_DCM_FIN_TIME_CONV_GAIN, "DCM fin-time gain 0");
+    clampInPlaceAndWarn(dcmFiniteTimeConvergenceParams(1), 0., s.MAX_DCM_FIN_TIME_CONV_GAIN, "DCM fin-time gain 1");
     clampInPlaceAndWarn(comdErrorGain, 0., s.MAX_COMD_GAIN, "CoMd gain");
     clampInPlaceAndWarn(zmpdGain, 0., s.MAX_ZMPD_GAIN, "ZMPd gain");
     clampInPlaceAndWarn(dfzAdmittance, 0., s.MAX_DFZ_ADMITTANCE, "DFz admittance");
@@ -472,7 +476,7 @@ struct MC_RBDYN_DLLAPI StabilizerConfiguration
       if(dcmTracking.has("gains"))
       {
         dcmTracking("gains")("prop", dcmPropGain);
-        dcmTracking("gains")("fin_time_conv", dcmFiniteTimeConvergenceGain);
+        dcmTracking("gains")("fin_time_conv", dcmFiniteTimeConvergenceParams);
         dcmTracking("gains")("integral", dcmIntegralGain);
         dcmTracking("gains")("deriv", dcmDerivGain);
         dcmTracking("gains")("comdError", comdErrorGain);
@@ -480,6 +484,7 @@ struct MC_RBDYN_DLLAPI StabilizerConfiguration
       }
       dcmTracking("derivator_time_constant", dcmDerivatorTimeConstant);
       dcmTracking("integrator_time_constant", dcmIntegratorTimeConstant);
+      dcmTracking("with_fin_time_control", withFiniteTimeDCMControl);
     }
     if(config.has("dcm_bias"))
     {
@@ -588,13 +593,14 @@ struct MC_RBDYN_DLLAPI StabilizerConfiguration
     conf.add("dcm_tracking");
     conf("dcm_tracking").add("gains");
     conf("dcm_tracking")("gains").add("prop", dcmPropGain);
-    conf("dcm_tracking")("gains").add("fin_time_conv", dcmFiniteTimeConvergenceGain);
+    conf("dcm_tracking")("gains").add("fin_time_conv", dcmFiniteTimeConvergenceParams);
     conf("dcm_tracking")("gains").add("integral", dcmIntegralGain);
     conf("dcm_tracking")("gains").add("deriv", dcmDerivGain);
     conf("dcm_tracking")("gains").add("comdError", comdErrorGain);
     conf("dcm_tracking")("gains").add("zmpd", zmpdGain);
     conf("dcm_tracking").add("derivator_time_constant", dcmDerivatorTimeConstant);
     conf("dcm_tracking").add("integrator_time_constant", dcmIntegratorTimeConstant);
+    conf("dcm_tracking").add("with_fin_time_control", withFiniteTimeDCMControl);
 
     conf.add("dcm_bias", dcmBias);
     conf.add("external_wrench", extWrench);

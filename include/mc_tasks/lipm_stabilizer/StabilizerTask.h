@@ -414,12 +414,25 @@ struct MC_TASKS_DLLAPI StabilizerTask : public MetaTask
     pelvisTask->stiffness(stiffness);
   }
 
-  inline void dcmGains(double p, double f, double i, double d) noexcept
+  inline void dcmGains(double p, double i, double d) noexcept
   {
     c_.dcmPropGain = clamp(p, 0., c_.safetyThresholds.MAX_DCM_P_GAIN);
-    c_.dcmFiniteTimeConvergenceGain = clamp(f, 0., c_.safetyThresholds.MAX_DCM_FIN_TIME_CONV_GAIN);
     c_.dcmIntegralGain = clamp(i, 0., c_.safetyThresholds.MAX_DCM_I_GAIN);
     c_.dcmDerivGain = clamp(d, 0., c_.safetyThresholds.MAX_DCM_D_GAIN);
+  }
+
+  inline void dcmFiniteTimeParameters(double f1, double f2, double f3) noexcept
+  {
+    c_.dcmFiniteTimeConvergenceParams(0) = clamp(f1, 0., c_.safetyThresholds.MAX_DCM_FIN_TIME_CONV_GAIN);
+    c_.dcmFiniteTimeConvergenceParams(1) = clamp(f2, 0., c_.safetyThresholds.MAX_DCM_FIN_TIME_CONV_GAIN);
+    c_.dcmFiniteTimeConvergenceParams(2) = f3;
+  }
+
+  inline void dcmFiniteTimeIntegral(double f1, double f2, double f3) noexcept
+  {
+    dcmErrorSignIntegral_(0) = f1;
+    dcmErrorSignIntegral_(1) = f2;
+    dcmErrorSignIntegral_(2) = f3;
   }
 
   inline void dcmIntegratorTimeConstant(double dcmIntegratorTimeConstant) noexcept
@@ -862,6 +875,10 @@ protected:
   Eigen::Vector3d dcmError_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d dcmErrorSqrt_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d dcmVelError_ = Eigen::Vector3d::Zero();
+
+  Eigen::Vector3d dcmErrorSignIntegral_ =
+      Eigen::Vector3d::Zero(); /// the integral of the sign of the dcm error (supertwisting)
+
   Eigen::Vector3d measuredCoM_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d measuredCoMd_ = Eigen::Vector3d::Zero();
   Eigen::Vector3d measuredZMP_ = Eigen::Vector3d::Zero();
@@ -905,6 +922,7 @@ protected:
 
   mc_filter::ExponentialMovingAverage<Eigen::Vector3d> dcmIntegrator_;
   mc_filter::StationaryOffset<Eigen::Vector3d> dcmDerivator_;
+
   bool inTheAir_ = false; /**< Is the robot in the air? */
   double dfzForceError_ = 0.; /**< Force error in foot force difference control */
   double dfzHeightError_ = 0.; /**< Height error in foot force difference control */

@@ -53,16 +53,34 @@ void StabilizerTask::addToGUI(mc_rtc::gui::StateBuilder & gui)
           [this]() -> Eigen::Vector2d {
             return {c_.dfzAdmittance, c_.dfzDamping};
           },
-          [this](const Eigen::Vector2d & a) {
+          [this](const Eigen::Vector2d & a)
+          {
             dfzAdmittance(a(0));
             dfzDamping(a(1));
           }),
       ArrayInput(
-          "DCM gains", {"Prop.", "Finite-Time", "Integral", "Deriv."},
-          [this]() -> Eigen::Vector4d {
-            return {c_.dcmPropGain, c_.dcmFiniteTimeConvergenceGain, c_.dcmIntegralGain, c_.dcmDerivGain};
+          "DCM gains", {"Prop.", "Integral", "Deriv."},
+          [this]() -> Eigen::Vector3d {
+            return {c_.dcmPropGain, c_.dcmIntegralGain, c_.dcmDerivGain};
           },
-          [this](const Eigen::Vector4d & gains) { dcmGains(gains(0), gains(1), gains(2), gains(3)); }),
+          [this](const Eigen::Vector3d & gains) { dcmGains(gains(0), gains(1), gains(2)); }),
+      Checkbox(
+          "Use finite time convergence Control instead", [this]() { return c_.withFiniteTimeDCMControl; },
+          [this]() { c_.withFiniteTimeDCMControl = !c_.withFiniteTimeDCMControl; }),
+      ArrayInput(
+          "DCM Finite-Time convergence gains", {"Gain 1", "Gain 2", "Saturation range"},
+          [this]() -> Eigen::Vector3d
+          {
+            return {c_.dcmFiniteTimeConvergenceParams(0), c_.dcmFiniteTimeConvergenceParams(1),
+                    c_.dcmFiniteTimeConvergenceParams(2)};
+          },
+          [this](const Eigen::Vector3d & ftParams) { dcmFiniteTimeParameters(ftParams(0), ftParams(1), ftParams(2)); }),
+      ArrayInput(
+          "Finite Time convergence integral value", {},
+          [this]() -> Eigen::Vector3d {
+            return {dcmErrorSignIntegral_(0), dcmErrorSignIntegral_(1), dcmErrorSignIntegral_(2)};
+          },
+          [this](const Eigen::Vector3d & intVal) { dcmFiniteTimeIntegral(intVal(0), intVal(1), intVal(2)); }),
       NumberInput(
           "CoMd Error gain", [this]() { return c_.comdErrorGain; }, [this](double a) { c_.comdErrorGain = a; }),
       NumberInput(
@@ -72,7 +90,8 @@ void StabilizerTask::addToGUI(mc_rtc::gui::StateBuilder & gui)
           [this]() -> Eigen::Vector2d {
             return {dcmIntegrator_.timeConstant(), dcmDerivator_.timeConstant()};
           },
-          [this](const Eigen::Vector2d & T) {
+          [this](const Eigen::Vector2d & T)
+          {
             dcmIntegratorTimeConstant(T(0));
             dcmDerivatorTimeConstant(T(1));
           }));
@@ -393,7 +412,7 @@ void StabilizerTask::addToLogger(mc_rtc::Logger & logger)
   logger.addLogEntry(name_ + "_dcmTracking_integralGain", this, [this]() { return c_.dcmIntegralGain; });
   logger.addLogEntry(name_ + "_dcmTracking_propGain", this, [this]() { return c_.dcmPropGain; });
   logger.addLogEntry(name_ + "_dcmTracking_finiteTimeConvGain", this,
-                     [this]() { return c_.dcmFiniteTimeConvergenceGain; });
+                     [this]() -> const Eigen::Vector3d & { return c_.dcmFiniteTimeConvergenceParams; });
   logger.addLogEntry(name_ + "_dcmTracking_comdErrorGain", this, [this]() { return c_.comdErrorGain; });
   logger.addLogEntry(name_ + "_dcmTracking_zmpdGain", this, [this]() { return c_.zmpdGain; });
   logger.addLogEntry(name_ + "_dcmBias_dcmMeasureErrorStd", this, [this]() { return c_.dcmBias.dcmMeasureErrorStd; });

@@ -84,11 +84,13 @@ JVRC1RobotModule::JVRC1RobotModule(bool fixed) : RobotModule(std::string(JVRC_VA
   _lipmStabilizerConfig.torsoPitch = 0;
   _lipmStabilizerConfig.copAdmittance = Eigen::Vector2d{0.01, 0.01};
   _lipmStabilizerConfig.dcmPropGain = 5.0;
-  _lipmStabilizerConfig.dcmFiniteTimeConvergenceGain = 0.;
   _lipmStabilizerConfig.dcmIntegralGain = 10;
   _lipmStabilizerConfig.dcmDerivGain = 0.5;
   _lipmStabilizerConfig.dcmDerivatorTimeConstant = 1;
   _lipmStabilizerConfig.dcmIntegratorTimeConstant = 10;
+
+  _lipmStabilizerConfig.withFiniteTimeDCMControl = false;
+  _lipmStabilizerConfig.dcmFiniteTimeConvergenceParams = Eigen::Vector3d::Zero();
 }
 
 } // namespace mc_robots

@@ -299,7 +299,7 @@ void StabilizerTask::disable()
   disableConfig_.dcmDerivGain = 0.;
   disableConfig_.dcmIntegralGain = 0.;
   disableConfig_.dcmPropGain = 0.;
-  disableConfig_.dcmFiniteTimeConvergenceGain = 0.;
+  disableConfig_.dcmFiniteTimeConvergenceParams = Eigen::Vector3d::Zero();
   disableConfig_.comdErrorGain = 0.;
   disableConfig_.zmpdGain = 0.;
   disableConfig_.dfzAdmittance = 0.;
@@ -802,6 +802,7 @@ sva::ForceVecd StabilizerTask::computeDesiredWrench()
   {
     dcmDerivator_.reset(Eigen::Vector3d::Zero());
     dcmIntegrator_.append(Eigen::Vector3d::Zero());
+
     dcmEstimatorNeedsReset_ = true;
   }
   else
@@ -859,15 +860,45 @@ sva::ForceVecd StabilizerTask::computeDesiredWrench()
   dcmAverageError_ = dcmIntegrator_.eval();
   dcmVelError_ = dcmDerivator_.eval();
 
-  dcmErrorSqrt_ = dcmError_.array().sign() * dcmError_.array().abs().sqrt();
-
   Eigen::Vector3d desiredCoMAccel = comddTarget_;
-  desiredCoMAccel +=
-      omega_
-      * (c_.dcmPropGain * dcmError_ + c_.dcmFiniteTimeConvergenceGain * dcmErrorSqrt_ + c_.comdErrorGain * comdError);
-  desiredCoMAccel += omega_ * c_.dcmIntegralGain * dcmAverageError_;
-  desiredCoMAccel += omega_ * c_.dcmDerivGain * dcmVelError_;
-  desiredCoMAccel -= omega_ * omega_ * c_.zmpdGain * zmpdTarget_;
+
+  if(!c_.withFiniteTimeDCMControl) /// linear control
+  {
+    dcmErrorSignIntegral_.setZero();
+
+    desiredCoMAccel += omega_ * c_.dcmPropGain * dcmError_;
+    desiredCoMAccel += omega_ * c_.dcmIntegralGain * dcmAverageError_;
+    desiredCoMAccel += omega_ * c_.dcmDerivGain * dcmVelError_;
+  }
+  else /// finite-time convergence control
+  {
+    double & satLimit = c_.dcmFiniteTimeConvergenceParams(2);
+
+    for(Eigen::Index i = 0; i < 3; ++i)
+    {
+      /// saturation approximation of the sign function
+      double sat = 1;
+      if(dcmError_(i) < -satLimit)
+      {
+        sat = -1;
+      }
+      else
+      {
+        if(satLimit > 1e-10 && dcmError_(i) < satLimit)
+        {
+          sat = ((dcmError_(i) > 0) - (dcmError_(i) < 0)) * std::pow(dcmError_(i) / satLimit, 2);
+        }
+      }
+      dcmErrorSqrt_(i) = sat * sqrt(fabs(dcmError_(i)));
+      dcmErrorSignIntegral_(i) += dt_ * sat;
+    }
+
+    desiredCoMAccel += omega_
+                       * (c_.dcmFiniteTimeConvergenceParams(0) * dcmErrorSqrt_
+                          + c_.dcmFiniteTimeConvergenceParams(1) * dcmErrorSignIntegral_);
+  }
+
+  desiredCoMAccel += omega_ * (c_.comdErrorGain * comdError) - omega_ * omega_ * c_.zmpdGain * zmpdTarget_;
 
   // Calculate CoM offset from measured wrench
   for(auto & extWrench : extWrenches_)

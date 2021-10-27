@@ -55,6 +55,12 @@ SizedEntries write_header(std::ofstream & ofs,
             << e.first << "_y;"
             << e.first << "_z";
         break;
+      case mc_rtc::log::LogType::Vector4d:
+        ofs << e.first << "_0;"
+            << e.first << "_1;"
+            << e.first << "_2;"
+            << e.first << "_3";
+        break;
       case mc_rtc::log::LogType::Vector6d:
         ofs << e.first << "_0;"
             << e.first << "_1;"
@@ -292,6 +298,9 @@ void write_data(std::ofstream & ofs, const mc_rtc::log::FlatLog & log, const Siz
         break;
       case mc_rtc::log::LogType::Vector3d:
         write_data<Eigen::Vector3d>(ofs, log, e.first, idx, e.second.size);
+        break;
+      case mc_rtc::log::LogType::Vector4d:
+        write_data<Eigen::Vector4d>(ofs, log, e.first, idx, e.second.size);
         break;
       case mc_rtc::log::LogType::Vector6d:
         write_data<Eigen::Vector6d>(ofs, log, e.first, idx, e.second.size);

@@ -70,6 +70,7 @@ struct SafetyThresholds
   double MAX_DCM_I_GAIN = 100.; /**< Maximum DCM average integral gain in [Hz] */
   double MAX_DCM_P_GAIN = 20.; /**< Maximum DCM proportional gain in [Hz] */
   double MAX_DCM_FIN_TIME_CONV_GAIN = 20.; /**< Maximum finite-time convergence gain in [Hz*m^(1/2)] */
+  double MAX_DCM_FIN_TIME_CONV_INTEGRAL = 0.3; /**< Maximum finite-time convergence integral for supertwisting */
   double MAX_COMD_GAIN = 10.; /**< Maximum CoMd gain in [Hz] */
   double MAX_ZMPD_GAIN = 10.; /**< Maximum ZMPd gain in [Hz] */
   double MAX_DFZ_ADMITTANCE = 5e-4; /**< Maximum admittance in [s] / [kg] for foot force difference control */

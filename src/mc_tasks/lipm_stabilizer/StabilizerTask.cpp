@@ -22,6 +22,7 @@ namespace lipm_stabilizer
 
 using internal::Contact;
 using ::mc_filter::utils::clamp;
+using ::mc_filter::utils::clampInPlace;
 using ::mc_filter::utils::clampInPlaceAndWarn;
 namespace constants = ::mc_rtc::constants;
 
@@ -892,6 +893,9 @@ sva::ForceVecd StabilizerTask::computeDesiredWrench()
       dcmErrorSqrt_(i) = sat * sqrt(fabs(dcmError_(i)));
       dcmErrorSignIntegral_(i) += dt_ * sat;
     }
+
+    clampInPlace(dcmErrorSignIntegral_, -omega_ * c_.safetyThresholds.MAX_DCM_FIN_TIME_CONV_INTEGRAL,
+                 omega_ * c_.safetyThresholds.MAX_DCM_FIN_TIME_CONV_INTEGRAL);
 
     desiredCoMAccel += omega_
                        * (c_.dcmFiniteTimeConvergenceParams(0) * dcmErrorSqrt_

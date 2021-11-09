@@ -110,6 +110,7 @@ void QPSolver::addTask(mc_tasks::MetaTask * task)
   {
     metaTasks_.push_back(task);
     task->addToSolver(*this);
+    task->resetIterInSolver();
     if(logger_)
     {
       task->addToLogger(*logger_);
@@ -136,6 +137,7 @@ void QPSolver::removeTask(mc_tasks::MetaTask * task)
   if(it != metaTasks_.end())
   {
     task->removeFromSolver(*this);
+    task->resetIterInSolver();
     if(logger_)
     {
       task->removeFromLogger(*logger_);
@@ -346,6 +348,7 @@ bool QPSolver::runOpenLoop()
   for(auto & t : metaTasks_)
   {
     t->update(*this);
+    t->incrementIterInSolver();
   }
   if(solver.solveNoMbcUpdate(robots_p->mbs(), robots_p->mbcs()))
   {
@@ -420,6 +423,7 @@ bool QPSolver::runJointsFeedback(bool wVelocity)
   for(auto & t : metaTasks_)
   {
     t->update(*this);
+    t->incrementIterInSolver();
   }
   if(solver.solveNoMbcUpdate(robots_p->mbs(), robots_p->mbcs()))
   {
@@ -471,6 +475,7 @@ bool QPSolver::runClosedLoop()
   for(auto & t : metaTasks_)
   {
     t->update(*this);
+    t->incrementIterInSolver();
   }
 
   // Solve QP and integrate
@@ -699,7 +704,7 @@ void QPSolver::gui(std::shared_ptr<mc_rtc::gui::StateBuilder> gui)
                          mc_rtc::gui::FormDataComboInput{"R0 surface", true, {"surfaces", "$R0"}},
                          mc_rtc::gui::FormDataComboInput{"R1", true, {"robots"}},
                          mc_rtc::gui::FormDataComboInput{"R1 surface", true, {"surfaces", "$R1"}},
-                         mc_rtc::gui::FormNumberInput{"Friction", false, mc_rbdyn::Contact::defaultFriction}));
+                         mc_rtc::gui::FormNumberInput("Friction", false, mc_rbdyn::Contact::defaultFriction)));
   }
 }
 

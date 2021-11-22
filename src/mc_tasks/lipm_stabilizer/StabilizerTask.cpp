@@ -878,7 +878,7 @@ sva::ForceVecd StabilizerTask::computeDesiredWrench()
 
     for(Eigen::Index i = 0; i < 3; ++i)
     {
-      /// saturation approximation of the sign function
+      /// sat is saturation approximation of the sign function
       double sat = 1;
       if(dcmError_(i) < -satLimit)
       {
@@ -888,19 +888,18 @@ sva::ForceVecd StabilizerTask::computeDesiredWrench()
       {
         if(satLimit > 1e-10 && dcmError_(i) < satLimit)
         {
+          /// Square the saturation to give it a more flat area around zero
+          /// ((dcmError_(i) > 0) - (dcmError_(i) < 0)) is jut the sign of dcmError
           sat = ((dcmError_(i) > 0) - (dcmError_(i) < 0)) * std::pow(dcmError_(i) / satLimit, 2);
         }
       }
       dcmErrorSqrt_(i) = sat * sqrt(fabs(dcmError_(i)));
-      dcmErrorSignIntegral_(i) += dt_ * sat;
+      dcmErrorSignIntegral_(i) += dt_ * c_.dcmFiniteTimeConvergenceParams(1) * sat;
     }
-
     clampInPlace(dcmErrorSignIntegral_, -omega_ * c_.safetyThresholds.MAX_DCM_FIN_TIME_CONV_INTEGRAL,
                  omega_ * c_.safetyThresholds.MAX_DCM_FIN_TIME_CONV_INTEGRAL);
 
-    desiredCoMAccel += omega_
-                       * (c_.dcmFiniteTimeConvergenceParams(0) * dcmErrorSqrt_
-                          + c_.dcmFiniteTimeConvergenceParams(1) * dcmErrorSignIntegral_);
+    desiredCoMAccel += omega_ * (c_.dcmFiniteTimeConvergenceParams(0) * dcmErrorSqrt_ + dcmErrorSignIntegral_);
   }
 
   desiredCoMAccel += omega_ * (c_.comdErrorGain * comdError) - omega_ * omega_ * c_.zmpdGain * zmpdTarget_;

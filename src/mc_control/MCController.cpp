@@ -85,7 +85,10 @@ MCController::MCController(const std::vector<std::shared_ptr<mc_rbdyn::RobotModu
   mc_rtc::log::info("MCController(base) ready");
 }
 
-MCController::~MCController() {}
+MCController::~MCController()
+{
+  datastore().clear();
+}
 
 mc_rbdyn::Robot & MCController::loadRobot(mc_rbdyn::RobotModulePtr rm, const std::string & name)
 {
@@ -140,6 +143,17 @@ mc_rbdyn::Robot & MCController::loadRobot(mc_rbdyn::RobotModulePtr rm,
 void MCController::removeRobot(const std::string & name)
 {
   robots().removeRobot(name);
+  realRobots().removeRobot(name);
+  if(gui_)
+  {
+    gui_->removeElement({"Robots"}, name);
+    auto data = gui_->data();
+    std::vector<std::string> robots = data("robots");
+    robots.erase(std::find(robots.begin(), robots.end(), name));
+    data.add("robots", robots);
+    data("bodies").remove(name);
+    data("surfaces").remove(name);
+  }
   solver().updateNrVars();
 }
 

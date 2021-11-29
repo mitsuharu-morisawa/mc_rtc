@@ -136,6 +136,8 @@ struct DCMBiasEstimatorConfiguration
   double biasDriftPerSecondStd = 0.02;
   /// Maximum bias in the sagital and lateral directions [m]
   Eigen::Vector2d biasLimit = {0.02, 0.02};
+  /// Maximum bias in the sagital and lateral directions used to correct the CoM, should be smaller than bisaLimit [m]
+  Eigen::Vector2d comBiasLimit = biasLimit;
   /// Whether the DCM bias estimator is enabled (default: false for backwards compatibility)
   bool withDCMBias = false;
   /// Whether the DCM filter is enabled
@@ -150,6 +152,7 @@ struct DCMBiasEstimatorConfiguration
     config("zmpMeasureErrorStd", zmpMeasureErrorStd);
     config("biasDriftPerSecondStd", biasDriftPerSecondStd);
     config("biasLimit", biasLimit);
+    config("comBiasLimit", comBiasLimit);
     config("withDCMBias", withDCMBias);
     config("correctCoMPos", correctCoMPos);
     config("withDCMFilter", withDCMFilter);
@@ -163,6 +166,7 @@ struct DCMBiasEstimatorConfiguration
     config.add("zmpMeasureErrorStd", zmpMeasureErrorStd);
     config.add("biasDriftPerSecondStd", biasDriftPerSecondStd);
     config.add("biasLimit", biasLimit);
+    config.add("comBiasLimit", comBiasLimit);
     config.add("withDCMBias", withDCMBias);
     config.add("correctCoMPos", correctCoMPos);
     config.add("withDCMFilter", withDCMFilter);

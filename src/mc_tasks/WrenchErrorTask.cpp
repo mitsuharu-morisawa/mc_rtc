@@ -153,18 +153,18 @@ void WrenchErrorTask::addToSolver(mc_solver::QPSolver & solver)
 void WrenchErrorTask::addToLogger(mc_rtc::Logger & logger)
 {
   SurfaceTransformTask::addToLogger(logger);
-
+  
   // impedance parameters
   logger.addLogEntry(name_ + "_gains_D", this, [this]() -> const sva::ImpedanceVecd & { return gains().D().vec(); });
   logger.addLogEntry(name_ + "_gains_K", this, [this]() -> const sva::ImpedanceVecd & { return gains().K().vec(); });
   logger.addLogEntry(name_ + "_gains_wrench", this,
                      [this]() -> const sva::ImpedanceVecd & { return gains().wrench().vec(); });
-
+  
   // compliance values
   MC_RTC_LOG_HELPER(name_ + "_deltaCompliancePose", deltaCompPoseW_);
   MC_RTC_LOG_HELPER(name_ + "_deltaComplianceVel", deltaCompVelW_);
   MC_RTC_LOG_HELPER(name_ + "_deltaComplianceAccel", filteredDeltaCompAccelW_);
-
+  
   // target values
   MC_RTC_LOG_HELPER(name_ + "_targetPose", targetPoseW_);
   MC_RTC_LOG_HELPER(name_ + "_targetVel", targetVelW_);
@@ -175,39 +175,39 @@ void WrenchErrorTask::addToLogger(mc_rtc::Logger & logger)
   
   MC_RTC_LOG_HELPER(name_ + "_hold", hold_);
 }
-
+  
 void WrenchErrorTask::addToGUI(mc_rtc::gui::StateBuilder & gui)
 {
   // Don't add SurfaceTransformTask because the target of SurfaceTransformTask should not be set by user
   TrajectoryTaskGeneric<tasks::qp::SurfaceTransformTask>::addToGUI(gui);
-
+  
   gui.addElement({"Tasks", name_},
                  // pose
                  mc_rtc::gui::Transform(
-                     "targetPose", [this]() -> const sva::PTransformd & { return this->targetPose(); },
-                     [this](const sva::PTransformd & pos) { this->targetPose(pos); }),
+                                        "targetPose", [this]() -> const sva::PTransformd & { return this->targetPose(); },
+                                        [this](const sva::PTransformd & pos) { this->targetPose(pos); }),
                  mc_rtc::gui::Transform("compliancePose", [this]() { return this->compliancePose(); }),
                  mc_rtc::gui::Transform("pose", [this]() { return this->surfacePose(); }),
                  // wrench
                  mc_rtc::gui::ArrayLabel("wrenchError", {"cx", "cy", "cz", "fx", "fy", "fz"},
                                          [this]() { return this->wrenchError_.vector(); }),
                  mc_rtc::gui::Checkbox(
-                     "hold", [this]() { return hold_; }, [this]() { hold_ = !hold_; }));
+                                       "hold", [this]() { return hold_; }, [this]() { hold_ = !hold_; }));
   gui.addElement({"Tasks", name_, "Impedance gains"},
                  mc_rtc::gui::ArrayInput(
-                     "damper", {"cx", "cy", "cz", "fx", "fy", "fz"},
-                     [this]() -> const sva::ImpedanceVecd & { return gains().damper().vec(); },
-                     [this](const Eigen::Vector6d & a) { gains().damper().vec(a); }),
+                                         "damper", {"cx", "cy", "cz", "fx", "fy", "fz"},
+                                         [this]() -> const sva::ImpedanceVecd & { return gains().damper().vec(); },
+                                         [this](const Eigen::Vector6d & a) { gains().damper().vec(a); }),
                  mc_rtc::gui::ArrayInput(
-                     "spring", {"cx", "cy", "cz", "fx", "fy", "fz"},
-                     [this]() -> const sva::ImpedanceVecd & { return gains().spring().vec(); },
-                     [this](const Eigen::Vector6d & a) { gains().spring().vec(a); }),
+                                         "spring", {"cx", "cy", "cz", "fx", "fy", "fz"},
+                                         [this]() -> const sva::ImpedanceVecd & { return gains().spring().vec(); },
+                                         [this](const Eigen::Vector6d & a) { gains().spring().vec(a); }),
                  mc_rtc::gui::ArrayInput(
-                     "wrench", {"cx", "cy", "cz", "fx", "fy", "fz"},
-                     [this]() -> const sva::ImpedanceVecd & { return gains().wrench().vec(); },
-                     [this](const Eigen::Vector6d & a) { gains().wrench().vec(a); }));
+                                         "wrench", {"cx", "cy", "cz", "fx", "fy", "fz"},
+                                         [this]() -> const sva::ImpedanceVecd & { return gains().wrench().vec(); },
+                                         [this](const Eigen::Vector6d & a) { gains().wrench().vec(a); }));
 }
-
+  
 } // namespace force
 
 } // namespace mc_tasks
@@ -221,7 +221,7 @@ static auto registered = mc_tasks::MetaTaskLoader::register_load_function(
       using Allocator = Eigen::aligned_allocator<mc_tasks::force::WrenchErrorTask>;
       const auto robotIndex = robotIndexFromConfig(config, solver.robots(), "wrench");
       auto t = std::allocate_shared<mc_tasks::force::WrenchErrorTask>(Allocator{}, config("surface"), solver.robots(),
-                                                                 robotIndex);
+                                                                      robotIndex);
       t->reset();
       t->load(solver, config);
       return t;

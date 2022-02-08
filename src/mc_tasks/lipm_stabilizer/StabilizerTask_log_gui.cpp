@@ -138,34 +138,45 @@ void StabilizerTask::addToGUI(mc_rtc::gui::StateBuilder & gui)
                      "Enabled", [this]() { return c_.dcmBias.withDCMBias; },
                      [this]() { c_.dcmBias.withDCMBias = !c_.dcmBias.withDCMBias; }),
                  Checkbox(
+                     "Correct CoM Pos", [this]() { return c_.dcmBias.correctCoMPos; },
+                     [this]() { c_.dcmBias.correctCoMPos = !c_.dcmBias.correctCoMPos; }),
+                 Checkbox(
                      "Use Filtered DCM", [this]() { return c_.dcmBias.withDCMFilter; },
                      [this]() { c_.dcmBias.withDCMFilter = !c_.dcmBias.withDCMFilter; }));
   gui.addElement({"Tasks", name_, "Advanced", "DCM Bias"},
                  NumberInput(
                      "dcmMeasureErrorStd", [this]() { return c_.dcmBias.dcmMeasureErrorStd; },
-                     [this](double v) {
+                     [this](double v)
+                     {
                        c_.dcmBias.dcmMeasureErrorStd = v;
                        dcmEstimator_.setDcmMeasureErrorStd(v);
                      }),
                  NumberInput(
                      "zmpMeasureErrorStd", [this]() { return c_.dcmBias.zmpMeasureErrorStd; },
-                     [this](double v) {
+                     [this](double v)
+                     {
                        c_.dcmBias.zmpMeasureErrorStd = v;
                        dcmEstimator_.setZmpMeasureErrorStd(v);
                      }),
                  NumberInput(
                      "driftPerSecondStd", [this]() { return c_.dcmBias.biasDriftPerSecondStd; },
-                     [this](double v) {
+                     [this](double v)
+                     {
                        c_.dcmBias.biasDriftPerSecondStd = v;
                        dcmEstimator_.setBiasDriftPerSecond(v);
                      }),
                  ArrayInput(
                      "Bias Limit [m]", {"sagital", "lateral"},
                      [this]() -> const Eigen::Vector2d & { return c_.dcmBias.biasLimit; },
-                     [this](const Eigen::Vector2d & v) {
+                     [this](const Eigen::Vector2d & v)
+                     {
                        c_.dcmBias.biasLimit = v;
                        dcmEstimator_.setBiasLimit(v);
                      }),
+                 ArrayInput(
+                     "CoM bias Limit [m]", {"sagital", "lateral"},
+                     [this]() -> const Eigen::Vector2d & { return c_.dcmBias.comBiasLimit; },
+                     [this](const Eigen::Vector2d & v) { c_.dcmBias.comBiasLimit = v; }),
                  ArrayLabel("Local Bias", [this]() { return dcmEstimator_.getLocalBias(); }));
   gui.addElement({"Tasks", name_, "Advanced", "Ext Wrench"},
                  Checkbox(
@@ -486,6 +497,7 @@ void StabilizerTask::addToLogger(mc_rtc::Logger & logger)
   MC_RTC_LOG_HELPER(name_ + "_realRobot_comd", measuredCoMd_);
   MC_RTC_LOG_HELPER(name_ + "_realRobot_dcm", measuredDCM_);
   MC_RTC_LOG_HELPER(name_ + "_realRobot_dcm_unbiased", measuredDCMUnbiased_);
+  MC_RTC_LOG_HELPER(name_ + "_realRobot_com_unbiased", measuredCoMUnbiased_);
   logger.addLogEntry(name_ + "_realRobot_posW", this,
                      [this]() -> const sva::PTransformd & { return realRobot().posW(); });
   logger.addLogEntry(name_ + "_realRobot_wrench", this,

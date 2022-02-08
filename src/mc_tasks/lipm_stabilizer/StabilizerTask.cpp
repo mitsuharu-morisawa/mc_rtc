@@ -849,6 +849,18 @@ sva::ForceVecd StabilizerTask::computeDesiredWrench()
       /// the bias should also correct the CoM
       comError.head<2>() -= dcmEstimator_.getBias();
 
+      Eigen::Vector2d comBias = dcmEstimator_.getBias();
+      clampInPlace(comBias, (-c_.dcmBias.comBiasLimit).eval(), c_.dcmBias.comBiasLimit);
+
+      measuredCoMUnbiased_.head<2>() = measuredCoM_.head<2>() + comBias;
+      measuredCoMUnbiased_.z() = measuredCoM_.z();
+
+      if(c_.dcmBias.correctCoMPos)
+      {
+        /// correct the estimated CoM Position
+        measuredCoM_ = measuredCoMUnbiased_;
+      }
+
       measuredDCMUnbiased_ = dcmTarget_ - dcmError_;
     }
     else
